@@ -9,4 +9,5 @@ python-dotenv>=1.0.0
 flake8>=7.0.0
 pylint>=3.0.0
 radon>=6.0.0
+docker>=7.0.0
 requests>=2.31.0

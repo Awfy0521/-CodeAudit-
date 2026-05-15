@@ -16,6 +16,7 @@ dependencies = [
     "pylint>=3.0.0",
     "radon>=6.0.0",
     "requests>=2.31.0",
+    "docker>=7.0.0",
 ]
 
 [project.scripts]

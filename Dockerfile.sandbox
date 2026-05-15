@@ -1,0 +1,13 @@
+FROM python:3.13-slim
+
+# Python 工具链
+RUN pip install --no-cache-dir flake8 pylint pytest radon
+
+# Node.js + ESLint (JS/TS 审查)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nodejs npm default-jdk golang \
+    && rm -rf /var/lib/apt/lists/*
+RUN npm install -g eslint
+
+# 工作目录 — 代码将以 volume 挂载到 /code
+WORKDIR /code
