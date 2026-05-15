@@ -6,10 +6,10 @@ import traceback
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from database.models import init_db
@@ -20,6 +20,7 @@ from database.crud import (
     get_history,
     delete_task,
     save_report,
+    save_token_usage,
 )
 from agents.graph import review_graph
 
@@ -233,19 +234,28 @@ def run_review(task_id: str, code: str, source: str, scope: str, target_path: st
             "security_review": {},
             "performance_review": {},
             "business_logic_review": {},
+            "architecture_review": {},
+            "code_metrics": {},
             "merged_review": {},
             "fixed_code": "",
             "diff": "",
+            "token_usage": {},
             "error": "",
             "status": "reviewing",
             "task_id": task_id,
         }
         result = review_graph.invoke(initial_state)
 
+        # Save token usage
+        token_usage = result.get("token_usage", {})
+        if token_usage:
+            save_token_usage(task_id, token_usage)
+
         for review_type, key in [
             ("security", "security_review"),
             ("performance", "performance_review"),
             ("business", "business_logic_review"),
+            ("architecture", "architecture_review"),
         ]:
             review_data = result.get(key, {})
             if review_data:
@@ -255,6 +265,22 @@ def run_review(task_id: str, code: str, source: str, scope: str, target_path: st
                     findings=review_data.get("findings"),
                     severity_summary={"summary": review_data.get("summary", "")},
                 )
+
+        # Save code metrics separately
+        metrics = result.get("code_metrics", {})
+        if metrics:
+            save_report(
+                task_id=task_id,
+                review_type="metrics",
+                findings=list(metrics.get("functions", [])),
+                severity_summary={
+                    "summary": metrics.get("summary", ""),
+                    "maintainability": metrics.get("maintainability"),
+                    "complexity_grades": metrics.get("complexity_grades", {}),
+                    "raw_metrics": metrics.get("raw_metrics"),
+                    "heat_table": metrics.get("heat_table", []),
+                },
+            )
 
         merged = result.get("merged_review", {})
         if merged:
@@ -336,7 +362,251 @@ def remove_review(task_id: str):
     return {"message": "已删除"}
 
 
-if __name__ == "__main__":
+@app.get("/api/review/{task_id}/export")
+def export_report(task_id: str, format: str = Query("md", pattern="^(md|json)$")):
+    """导出审查报告为 Markdown 或 JSON 格式，返回可下载文件。"""
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    if format == "json":
+        import json
+        content = json.dumps(task, ensure_ascii=False, indent=2, default=str)
+        return Response(
+            content=content,
+            media_type="application/json",
+            headers={"Content-Disposition": f"attachment; filename=codeaudit_{task_id[:8]}.json"},
+        )
+
+    # Build Markdown report
+    source_labels = {"github_full": "GitHub 全仓库", "github_path": "GitHub + 路径", "local": "本地代码"}
+    code_lines = (task.get("code") or "").split("\n")
+    reports = {}
+    for r in task.get("reports") or []:
+        reports[r["review_type"]] = r
+
+    merged = reports.get("merged", {})
+    findings = merged.get("findings") or []
+    if isinstance(findings, str):
+        import json
+        try:
+            findings = json.loads(findings)
+        except json.JSONDecodeError:
+            findings = []
+
+    sev_labels = {"critical": "严重", "high": "高危", "medium": "中等", "low": "轻微"}
+    counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    for f in findings:
+        counts[f.get("severity", "low")] = counts.get(f.get("severity", "low"), 0) + 1
+
+    summary = merged.get("severity_summary") or {}
+    if isinstance(summary, str):
+        import json
+        try:
+            summary = json.loads(summary)
+        except json.JSONDecodeError:
+            summary = {}
+
+    token_usage = task.get("token_usage") or {}
+
+    md = f"""# 智审 CodeAudit — 审查报告
+
+## 基本信息
+
+| 项目 | 内容 |
+|------|------|
+| **任务 ID** | `{task_id}` |
+| **审查模式** | {source_labels.get(task.get("source", ""), task.get("source", "本地"))} |
+| **目标路径** | {task.get("target_path") or task.get("repo_url") or "直接输入"} |
+| **代码规模** | {len(code_lines)} 行 · {len(task.get("code") or "")} 字符 |
+| **审查时间** | {task.get("created_at", "")} |
+| **状态** | {task.get("status", "")} |
+
+## Token 用量
+
+| 指标 | 数量 |
+|------|------|
+| **Prompt Tokens** | {token_usage.get("prompt_tokens", 0):,} |
+| **Completion Tokens** | {token_usage.get("completion_tokens", 0):,} |
+| **总计** | {token_usage.get("total_tokens", 0):,} |
+
+## 审查裁定
+
+{summary.get("summary", "无")}
+
+{summary.get("fix_description", "") and f"**修复说明**: {summary['fix_description']}"}
+
+## 问题汇总
+
+| 严重等级 | 数量 |
+|----------|------|
+| 🔴 Critical | {counts["critical"]} |
+| 🟠 High | {counts["high"]} |
+| 🟡 Medium | {counts["medium"]} |
+| 🟢 Low | {counts["low"]} |
+| **合计** | **{sum(counts.values())}** |
+
+"""
+    # Append each finding
+    for i, f in enumerate(findings, 1):
+        sev = f.get("severity", "low")
+        sev_emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(sev, "⚪")
+        md += f"""### {i}. {sev_emoji} [{sev_labels.get(sev, sev)}] {f.get("category", "未分类")}
+
+- **行号**: L{f.get("line", "?")}
+- **描述**: {f.get("description", "")}
+- **建议**: {f.get("suggestion", "")}
+"""
+        if f.get("code_snippet"):
+            md += f"""
+```python
+{f['code_snippet']}
+```
+
+"""
+        found_by = f.get("found_by", [])
+        if found_by:
+            by_labels = {"security": "安全专家", "performance": "性能优化师", "business_logic": "业务逻辑审核", "architecture": "架构审查师"}
+            by_names = [by_labels.get(x, x) for x in found_by]
+            md += f"**发现者**: {', '.join(by_names)}\n\n"
+
+    # Fix code section
+    fixed_code = merged.get("fixed_code") or ""
+    if fixed_code:
+        md += f"""## 修复后代码
+
+```python
+{fixed_code}
+```
+
+"""
+
+    # Diff section
+    diff = merged.get("diff") or ""
+    if diff:
+        md += f"""## Diff 对比
+
+```diff
+{diff}
+```
+
+"""
+
+    md += f"""---
+*由智审 CodeAudit 多智能体审查系统生成 · {task_id[:8]}*"""
+
+    return Response(
+        content=md,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename=codeaudit_{task_id[:8]}.md"},
+    )
+
+
+@app.get("/api/trends")
+def get_trends():
+    """获取审查趋势数据，用于可视化看板。"""
+    import json
+    from database.models import SessionLocal, ReviewTask, ReviewReport
+    from sqlalchemy import func
+
+    with SessionLocal() as session:
+        total_tasks = session.query(func.count(ReviewTask.id)).scalar() or 0
+        completed = session.query(func.count(ReviewTask.id)).filter(ReviewTask.status == "completed").scalar() or 0
+        failed = session.query(func.count(ReviewTask.id)).filter(ReviewTask.status == "failed").scalar() or 0
+
+        # Reviews by source type
+        source_counts = {}
+        for row in session.query(ReviewTask.source, func.count(ReviewTask.id)).group_by(ReviewTask.source).all():
+            source_counts[row[0]] = row[1]
+
+        # Recent 30 tasks timeline
+        recent_tasks = (
+            session.query(ReviewTask)
+            .order_by(ReviewTask.created_at.desc())
+            .limit(30)
+            .all()
+        )
+        timeline = []
+        for t in reversed(recent_tasks):
+            reports = session.query(ReviewReport).filter(ReviewReport.task_id == t.id).all()
+            merged_report = next((r for r in reports if r.review_type == "merged"), None)
+            findings_count = 0
+            if merged_report and merged_report.findings:
+                try:
+                    f = json.loads(merged_report.findings)
+                    findings_count = len(f) if isinstance(f, list) else 0
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            timeline.append({
+                "id": t.id,
+                "date": t.created_at.isoformat() if t.created_at else "",
+                "status": t.status,
+                "source": t.source,
+                "findings_count": findings_count,
+            })
+
+        # Token usage aggregate
+        total_prompt = 0
+        total_completion = 0
+        total_tokens = 0
+        tasks_with_usage = 0
+        for t in session.query(ReviewTask).filter(ReviewTask.token_usage.isnot(None)).all():
+            try:
+                u = json.loads(t.token_usage)
+                total_prompt += u.get("prompt_tokens", 0)
+                total_completion += u.get("completion_tokens", 0)
+                total_tokens += u.get("total_tokens", 0)
+                tasks_with_usage += 1
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Average findings per completed review
+        avg_findings = 0
+        if completed > 0:
+            total_findings = 0
+            for t in session.query(ReviewTask).filter(ReviewTask.status == "completed").all():
+                merged = session.query(ReviewReport).filter(
+                    ReviewReport.task_id == t.id,
+                    ReviewReport.review_type == "merged"
+                ).first()
+                if merged and merged.findings:
+                    try:
+                        f = json.loads(merged.findings)
+                        if isinstance(f, list):
+                            total_findings += len(f)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+            avg_findings = round(total_findings / completed, 1)
+
+        return {
+            "summary": {
+                "total_tasks": total_tasks,
+                "completed": completed,
+                "failed": failed,
+                "by_source": source_counts,
+                "avg_findings": avg_findings,
+            },
+            "token_usage": {
+                "total_prompt_tokens": total_prompt,
+                "total_completion_tokens": total_completion,
+                "total_tokens": total_tokens,
+                "tasks_tracked": tasks_with_usage,
+            },
+            "timeline": timeline,
+        }
+
+
+def start():
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
+
+def dev():
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+
+
+if __name__ == "__main__":
+    dev()

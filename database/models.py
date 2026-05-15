@@ -27,6 +27,7 @@ class ReviewTask(Base):
     target_path = Column(String(500), nullable=True)
     repo_url = Column(String(1000), nullable=True)
     status = Column(String(20), nullable=False, default="pending")
+    token_usage = Column(Text, nullable=True)  # JSON: {"prompt_tokens": int, "completion_tokens": int, "total_tokens": int}
     created_at = Column(DateTime, nullable=False, default=utcnow)
     updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
@@ -58,3 +59,11 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    # Add token_usage column if missing (migration for existing databases)
+    from sqlalchemy import inspect, text
+    inspector = inspect(engine)
+    columns = [c["name"] for c in inspector.get_columns("review_tasks")]
+    if "token_usage" not in columns:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE review_tasks ADD COLUMN token_usage TEXT"))
+            conn.commit()

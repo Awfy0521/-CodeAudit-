@@ -335,6 +335,11 @@
   .progress-timer .pt-time { font-family:'JetBrains Mono',monospace; font-size:28px; color:var(--blue-500); font-weight:300; }
   .progress-timer .pt-msg { font-size:12px; color:var(--text-dim); margin-top:2px; }
 
+  .load-bar-wrap { margin-top:14px; }
+  .load-bar { width:100%; max-width:360px; height:6px; background:var(--surface2); border-radius:3px; overflow:hidden; margin:0 auto; }
+  .load-bar-fill { height:100%; width:0%; background:linear-gradient(90deg, var(--blue-400), var(--blue-500), var(--purple)); border-radius:3px; transition:width 0.15s linear; }
+  .load-bar-text { font-size:11px; color:var(--text-dim); margin-top:4px; font-family:"JetBrains Mono",monospace; }
+
   /* 7-step pipeline bar */
   .prog-pipeline { display:flex; align-items:center; justify-content:center; gap:0; margin-bottom:24px; padding:16px 20px; background:var(--surface); border:1px solid var(--border-light); border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); overflow-x:auto; }
   .pp-step { display:flex; flex-direction:column; align-items:center; gap:4px; min-width:56px; flex-shrink:0; transition:all 0.4s; opacity:0.35; position:relative; }
@@ -531,6 +536,7 @@
       <li><a onclick="goHome()" class="active" data-page="home">首页</a></li>
       <li><a onclick="startWorkflow()" data-page="review">开始审查</a></li>
       <li><a onclick="goToStage('history')" data-page="history">历史记录</a></li>
+      <li><a onclick="goToTrends()" data-page="trends">趋势看板</a></li>
     </ul>
   </div>
   <div class="nav-status"><div class="nav-dot" id="navDot"></div><span id="navStatusText">就绪</span></div>
@@ -802,6 +808,10 @@
     <div class="progress-timer">
       <div class="pt-time" id="progressTimer">0.0s</div>
       <div class="pt-msg" id="progressMsg">正在启动审查管线...</div>
+      <div class="load-bar-wrap" id="loadBarWrap" style="display:none;">
+        <div class="load-bar"><div class="load-bar-fill" id="loadBarFill"></div></div>
+        <div class="load-bar-text" id="loadBarText">0%</div>
+      </div>
     </div>
 
     <!-- 7-step pipeline progress bar -->
@@ -896,9 +906,9 @@
     <span style="font-size:11px;color:var(--text-dim);" id="resultTaskId"></span>
     <div id="resultsContainer"></div>
     <div class="results-footer">
-      <button class="btn btn-primary" onclick="finishReview()" style="padding:14px 48px;font-size:15px;">
-        ✓ 完成审查，返回首页
-      </button>
+      <button class="btn btn-outline" onclick="exportReport('md')" style="margin-right:12px;">📥 导出 Markdown</button>
+      <button class="btn btn-outline" onclick="exportReport('json')" style="margin-right:12px;">📋 导出 JSON</button>
+      <button class="btn btn-primary" onclick="finishReview()" style="padding:14px 48px;font-size:15px;">✓ 完成审查，返回首页</button>
     </div>
   </div>
 </div>
@@ -917,6 +927,20 @@
   </div>
 </div>
 
+<!-- ═══════════ PAGE: TRENDS ═══════════ -->
+<div class="page" id="page-trends">
+  <div style="max-width:1100px;margin:0 auto;padding:28px 24px 64px;">
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-header"><span class="card-title">审查趋势看板</span>
+        <button class="btn btn-ghost" onclick="loadTrends()" style="font-size:12px;">刷新</button>
+      </div>
+      <div id="trendsContainer">
+        <div class="empty-state"><div class="es-icon">📈</div><div class="es-title">加载中...</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const API = '';
 let currentMode = 'github_full';
@@ -927,7 +951,7 @@ let pollTimer = null;
 let uiTimer = null;
 let progressStart = 0;
 let stageState = { review:'done', progress:'', results:'' };
-let simulatedFindings = { security:0, performance:0, business:0 };
+let simulatedFindings = { security:0, performance:0, business:0, architecture:0 };
 let codePreviewLines = [];
 let agentIssueLines = { security:[], performance:[], business:[] };
 let pollCount = 0;
@@ -1127,7 +1151,7 @@ function updateCodeAnnotations(elapsed) {
 }
 
 function resetCodeAnnotations() {
-  agentIssueLines = { security:[], performance:[], business:[] };
+  agentIssueLines = { security:[], performance:[], business:[], architecture:[] };
   codePreviewLines = [];
 }
 
@@ -1384,7 +1408,7 @@ async function pollProgress() {
     const data = await resp.json();
     if (data.status === 'completed') {
       clearInterval(pollTimer); clearInterval(uiTimer);
-      updateAgentCards({agents:{security:'done',performance:'done',business:'done'},orchestrator:'done',allWorkersDone:true,allDone:true,activeStage:7});
+      updateAgentCards({agents:{security:'done',performance:'done',business:'done',architecture:'done'},orchestrator:'done',allWorkersDone:true,allDone:true,activeStage:7});
       // Mark all pipeline steps as done
       updatePipelineUI(getPipelineStage(60));
       // Show team panel again
@@ -1408,15 +1432,15 @@ async function pollProgress() {
       const af = document.getElementById('af-orchestrator');
       if (af) af.textContent = total + ' 个问题 · 修复代码已生成';
 
-      $('progressMsg').textContent = '审查完成！正在加载结果...';
+      $('progressMsg').textContent = '审查完成！正在生成报告...';
       stageState = { review:'done', progress:'done', results:'active' };
       updateStageBar();
-      setTimeout(() => { renderResults(data); navigateToPage('results'); }, 1000);
+      startLoadBar(() => { renderResults(data); navigateToPage('results'); });
     } else if (data.status === 'failed') {
       clearInterval(pollTimer); clearInterval(uiTimer);
       stageState = { review:'done', progress:'done', results:'active' };
       updateStageBar();
-      setTimeout(() => { renderResults(data); navigateToPage('results'); }, 800);
+      startLoadBar(() => { renderResults(data); navigateToPage('results'); });
     }
   } catch(e) {}
 }
@@ -1456,6 +1480,7 @@ function renderResults(data) {
         <span>目标: ${escHtml(target?.substring(0,80)||'—')}</span>
         <span>规模: ${codeLines} 行 · ${codeLen} 字符${fileMatches.length>1?' · '+fileMatches.length+' 个文件':''}</span>
         <span>问题: ${findings.length} 个</span>
+        ${data.token_usage ? `<span>Token: ${(data.token_usage.total_tokens||0).toLocaleString()}</span>` : ''}
       </div>
     </div>
     <div class="summary-grid">
@@ -1607,7 +1632,7 @@ function buildFixedTab(code) {
 window.toggleFinding = function(id) { document.getElementById(id)?.classList.toggle('expanded'); };
 
 window.switchResultTab = function(key) {
-  const tabs = ['merged','security','performance','business','diff','fixed'];
+  const tabs = ['merged','security','performance','business','architecture','metrics','diff','fixed'];
   document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', tabs[i]===key));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
   const el = document.getElementById('tab-'+key);
@@ -1659,6 +1684,128 @@ async function viewHistoryTask(taskId) {
     $('stageBarWrap').classList.add('show');
     renderResults(data); navigateToPage('results');
   } catch(e) {}
+}
+
+// ── Load Bar ────────────────────────────
+function startLoadBar(callback) {
+  const wrap = $('loadBarWrap');
+  const fill = $('loadBarFill');
+  const text = $('loadBarText');
+  if (!wrap || !fill) { callback(); return; }
+  wrap.style.display = 'block';
+  fill.style.width = '0%';
+  text.textContent = '0%';
+  let pct = 0;
+  const step = () => {
+    const remaining = 100 - pct;
+    const inc = Math.max(1, Math.floor(remaining * 0.15));
+    pct = Math.min(100, pct + inc);
+    fill.style.width = pct + '%';
+    text.textContent = pct + '%';
+    if (pct >= 100) {
+      setTimeout(callback, 150);
+    } else {
+      setTimeout(step, Math.random() * 80 + 40);
+    }
+  };
+  step();
+}
+
+// ── Export ──────────────────────────────
+window.exportReport = function(format) {
+  if (!currentTaskId) return;
+  const url = API + '/api/review/' + currentTaskId + '/export?format=' + format;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+};
+
+// ── Trends ──────────────────────────────
+window.goToTrends = function() {
+  clearInterval(pollTimer); clearInterval(uiTimer);
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  $('page-trends').classList.add('active');
+  $('stageBarWrap').classList.remove('show');
+  document.querySelectorAll('.nav-links a').forEach(l => l.classList.remove('active'));
+  document.querySelector('[data-page="trends"]').classList.add('active');
+  loadTrends();
+};
+
+async function loadTrends() {
+  const container = $('trendsContainer');
+  container.innerHTML = '<div class="empty-state"><div class="es-icon">📈</div><div class="es-title">加载中...</div></div>';
+  try {
+    const resp = await fetch(API + '/api/trends');
+    const data = await resp.json();
+    renderTrends(data);
+  } catch(e) {
+    container.innerHTML = '<div class="empty-state"><div class="es-icon">⚠</div><div class="es-title">加载失败</div><div class="es-sub">无法连接到后端</div></div>';
+  }
+}
+
+function renderTrends(data) {
+  const s = data.summary || {};
+  const tu = data.token_usage || {};
+  const timeline = data.timeline || [];
+  const sourceLabels = {github_full:'GitHub 全仓库', github_path:'GitHub + 路径', local:'本地代码'};
+
+  let srcHtml = '';
+  for (const [k, v] of Object.entries(s.by_source || {})) {
+    srcHtml += '<div style="background:var(--surface);border:1px solid var(--border-light);border-radius:var(--radius);padding:14px;text-align:center;">' +
+      '<div style="font-size:20px;font-weight:600;color:var(--blue-500);">' + v + '</div>' +
+      '<div style="font-size:10px;color:var(--text-dim);letter-spacing:0.5px;">' + (sourceLabels[k]||k) + '</div></div>';
+  }
+
+  let timelineHtml = '';
+  if (timeline.length > 0) {
+    const maxFindings = Math.max(1, ...timeline.map(t => t.findings_count || 0));
+    timelineHtml = '<div style="margin-top:16px;"><div style="font-size:11px;font-weight:600;color:var(--text-dim);margin-bottom:10px;letter-spacing:0.5px;">近期审查时间线</div>';
+    timelineHtml += '<div style="display:flex;align-items:flex-end;gap:4px;height:120px;padding:8px 0;">';
+    timeline.forEach(t => {
+      const h = Math.max(4, ((t.findings_count || 0) / maxFindings) * 100);
+      const color = t.status === 'completed' ? 'var(--blue-400)' : t.status === 'failed' ? 'var(--red)' : 'var(--amber)';
+      const title = (t.date||'?').substring(0,10) + ' · ' + (t.findings_count||0) + '个问题 · ' + (sourceLabels[t.source]||t.source);
+      timelineHtml += '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;min-width:8px;" title="' + title + '">' +
+        '<div style="width:100%;background:' + color + ';border-radius:2px 2px 0 0;height:' + h + '%;min-height:' + (t.findings_count>0?4:1) + 'px;opacity:' + (t.status==='completed'?1:0.5) + ';"></div></div>';
+    });
+    timelineHtml += '</div><div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text-faint);margin-top:4px;">';
+    if (timeline.length > 0) {
+      timelineHtml += '<span>' + (timeline[0].date||'').substring(0,10) + '</span>';
+      timelineHtml += '<span>' + (timeline[timeline.length-1].date||'').substring(0,10) + '</span>';
+    }
+    timelineHtml += '</div></div>';
+  }
+
+  $('trendsContainer').innerHTML =
+    '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;">' +
+      '<div style="background:var(--surface);border:1px solid var(--border-light);border-radius:var(--radius);padding:18px;text-align:center;">' +
+        '<div style="font-size:32px;font-weight:600;color:var(--blue-500);">' + (s.total_tasks||0) + '</div>' +
+        '<div style="font-size:10px;color:var(--text-dim);letter-spacing:0.5px;text-transform:uppercase;">总审查次数</div></div>' +
+      '<div style="background:var(--surface);border:1px solid var(--border-light);border-radius:var(--radius);padding:18px;text-align:center;">' +
+        '<div style="font-size:32px;font-weight:600;color:var(--green);">' + (s.completed||0) + '</div>' +
+        '<div style="font-size:10px;color:var(--text-dim);letter-spacing:0.5px;text-transform:uppercase;">已完成</div></div>' +
+      '<div style="background:var(--surface);border:1px solid var(--border-light);border-radius:var(--radius);padding:18px;text-align:center;">' +
+        '<div style="font-size:32px;font-weight:600;color:' + ((s.failed||0)>0?'var(--red)':'var(--text-dim)') + ';">' + (s.failed||0) + '</div>' +
+        '<div style="font-size:10px;color:var(--text-dim);letter-spacing:0.5px;text-transform:uppercase;">失败</div></div>' +
+      '<div style="background:var(--surface);border:1px solid var(--border-light);border-radius:var(--radius);padding:18px;text-align:center;">' +
+        '<div style="font-size:32px;font-weight:600;color:var(--blue-500);">' + (s.avg_findings||0) + '</div>' +
+        '<div style="font-size:10px;color:var(--text-dim);letter-spacing:0.5px;text-transform:uppercase;">平均发现问题</div></div>' +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px;">' + srcHtml + '</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">' +
+      '<div style="background:var(--surface);border:1px solid var(--border-light);border-radius:var(--radius);padding:16px;text-align:center;">' +
+        '<div style="font-size:24px;font-weight:600;color:var(--blue-500);">' + (tu.total_prompt_tokens||0).toLocaleString() + '</div>' +
+        '<div style="font-size:10px;color:var(--text-dim);letter-spacing:0.5px;">Prompt Tokens 总计</div></div>' +
+      '<div style="background:var(--surface);border:1px solid var(--border-light);border-radius:var(--radius);padding:16px;text-align:center;">' +
+        '<div style="font-size:24px;font-weight:600;color:var(--blue-500);">' + (tu.total_completion_tokens||0).toLocaleString() + '</div>' +
+        '<div style="font-size:10px;color:var(--text-dim);letter-spacing:0.5px;">Completion Tokens 总计</div></div>' +
+      '<div style="background:var(--surface);border:1px solid var(--border-light);border-radius:var(--radius);padding:16px;text-align:center;">' +
+        '<div style="font-size:24px;font-weight:600;color:var(--blue-500);">' + (tu.total_tokens||0).toLocaleString() + '</div>' +
+        '<div style="font-size:10px;color:var(--text-dim);letter-spacing:0.5px;">全部 Tokens · ' + (tu.tasks_tracked||0) + ' 次审查</div></div>' +
+    '</div>' + timelineHtml;
 }
 
 // ── Init ────────────────────────────────

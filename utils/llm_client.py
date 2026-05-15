@@ -39,10 +39,11 @@ class LLMClient:
         temperature: float = 0.3,
         max_tokens: int = 4096,
         json_mode: bool = False,
-    ) -> str:
+    ) -> dict:
         """
         调用 LLM 聊天接口，带重试和自动降级。
-        返回模型响应文本；失败时抛出 RuntimeError。
+        返回 {"content": str, "usage": {"prompt_tokens": int, "completion_tokens": int, "total_tokens": int}}
+        失败时抛出 RuntimeError。
         """
         last_error = None
         providers_to_try = [self.provider] + (
@@ -63,7 +64,12 @@ class LLMClient:
                         kwargs["response_format"] = {"type": "json_object"}
 
                     resp = client.client.chat.completions.create(**kwargs)
-                    return resp.choices[0].message.content
+                    usage = {
+                        "prompt_tokens": resp.usage.prompt_tokens if resp.usage else 0,
+                        "completion_tokens": resp.usage.completion_tokens if resp.usage else 0,
+                        "total_tokens": resp.usage.total_tokens if resp.usage else 0,
+                    }
+                    return {"content": resp.choices[0].message.content, "usage": usage}
 
                 except Exception as e:
                     last_error = e
@@ -79,8 +85,8 @@ class LLMClient:
         code: str,
         lint_results: str,
         system_prompt: str,
-    ) -> str:
-        """发送代码 + lint 结果给 LLM 进行审查。"""
+    ) -> dict:
+        """发送代码 + lint 结果给 LLM 进行审查。返回 {"content": str, "usage": dict}。"""
         messages = [
             {"role": "system", "content": system_prompt},
             {

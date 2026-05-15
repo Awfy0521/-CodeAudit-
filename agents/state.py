@@ -8,9 +8,12 @@ class ReviewState(TypedDict):
     security_review: dict
     performance_review: dict
     business_logic_review: dict
+    architecture_review: dict
+    code_metrics: dict
     merged_review: dict
     fixed_code: str
     diff: str
+    token_usage: dict
     error: str
     status: str
     task_id: str

@@ -22,8 +22,9 @@ Multi-agent code review system using LangGraph orchestration with three parallel
 ## Running locally
 
 ```bash
-pip install -r requirements.txt
-python main.py          # FastAPI on :8000, serves SPA at /
+uv sync                 # install dependencies (first time)
+uv run dev              # dev mode with hot reload on :8000
+uv run start            # production mode on :8000
 ```
 
 ## Docker deployment

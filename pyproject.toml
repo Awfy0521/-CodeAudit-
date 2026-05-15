@@ -1,0 +1,24 @@
+[project]
+name = "codeaudit"
+version = "1.0.0"
+description = "智审 CodeAudit — 多智能体代码审查与修复机器人"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "langgraph>=1.0.0",
+    "langgraph-checkpoint-sqlite>=3.0.0",
+    "openai>=2.0.0",
+    "sqlalchemy>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "flake8>=7.0.0",
+    "pylint>=3.0.0",
+    "radon>=6.0.0",
+    "requests>=2.31.0",
+]
+
+[project.scripts]
+dev = "main:dev"
+start = "main:start"
+

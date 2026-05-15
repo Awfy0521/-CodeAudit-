@@ -14,11 +14,11 @@ docker compose up -d
 open http://localhost:8000
 ```
 
-不使用 Docker：
+本地开发（需 Python 3.12+）：
 
 ```bash
-pip install -r requirements.txt
-python main.py
+uv run dev          # 热重载，开发模式
+uv run start        # 生产模式
 # 访问 http://localhost:8000
 ```
 

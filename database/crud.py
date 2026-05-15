@@ -42,6 +42,15 @@ def update_task_status(task_id: str, status: str):
             session.commit()
 
 
+def save_token_usage(task_id: str, usage: dict):
+    """保存 Token 用量到任务记录。"""
+    with SessionLocal() as session:
+        task = session.query(ReviewTask).filter(ReviewTask.id == task_id).first()
+        if task:
+            task.token_usage = json.dumps(usage, ensure_ascii=False)
+            session.commit()
+
+
 def save_report(
     task_id: str,
     review_type: str,
@@ -78,6 +87,7 @@ def get_task(task_id: str) -> dict | None:
             "target_path": task.target_path,
             "repo_url": task.repo_url,
             "status": task.status,
+            "token_usage": json.loads(task.token_usage) if task.token_usage else None,
             "created_at": task.created_at.isoformat(),
             "updated_at": task.updated_at.isoformat(),
             "reports": [
