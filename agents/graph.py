@@ -12,6 +12,7 @@ from agents.workers import (
 )
 from utils.llm_client import get_llm_client
 from tools.code_metrics import run_code_metrics
+from debate import run_cross_review, merge_cross_reviews
 
 ORCHESTRATOR_PROMPT = """你是一位代码审查决策者(Orchestrator)，负责汇总多个专家的审查意见并做出最终决策。
 
@@ -71,11 +72,20 @@ def start_node(state: ReviewState) -> ReviewState:
     state["merged_review"] = {}
     state["fixed_code"] = ""
     state["diff"] = ""
-    # Run code metrics (radon) for business logic & architecture workers
+    state["pre_merged_findings"] = []
+    state["debate_results"] = []
+    # 代码度量
     try:
         state["code_metrics"] = run_code_metrics(state["code"])
     except Exception:
         state["code_metrics"] = {}
+    # RAG 索引
+    try:
+        from rag import index_code
+        chunks = index_code(state["code"])
+        state["chunks"] = [c.to_dict() for c in chunks]
+    except Exception:
+        state["chunks"] = []
     return state
 
 
@@ -98,23 +108,41 @@ def orchestrator(state: ReviewState) -> ReviewState:
         review_summary_parts.append(f"### {role} 审查结果\n{findings_text}")
     review_summary = "\n\n".join(review_summary_parts)
 
+    # 交叉审查摘要
+    debate_summary = ""
+    debate_results = state.get("debate_results", [])
+    if debate_results:
+        debate_parts = []
+        for dr in debate_results:
+            agent = dr.get("agent", "unknown")
+            opinions = dr.get("cross_opinions", [])
+            if opinions:
+                opinion_text = json.dumps(opinions, ensure_ascii=False, indent=2)
+                debate_parts.append(f"### {agent} 交叉审查意见\n{opinion_text}")
+        if debate_parts:
+            debate_summary = "\n\n".join(debate_parts)
+
     client = get_llm_client()
     try:
-        raw = client.chat(
-            messages=[
-                {"role": "system", "content": ORCHESTRATOR_PROMPT},
-                {
-                    "role": "user",
-                    "content": f"""## 原始代码
+        user_content = f"""## 原始代码
 ```python
 {state["code"]}
 ```
 
 ## 各专家审查结果
-{review_summary}
+{review_summary}"""
+        if debate_summary:
+            user_content += f"""
 
-请汇总并生成修复代码。""",
-                },
+## 交叉审查意见（综合考量）
+{debate_summary}"""
+        user_content += """
+
+请汇总并生成修复代码。"""
+        raw = client.chat(
+            messages=[
+                {"role": "system", "content": ORCHESTRATOR_PROMPT},
+                {"role": "user", "content": user_content},
             ],
             temperature=0.2,
             max_tokens=8192,
@@ -232,6 +260,43 @@ def orchestrator(state: ReviewState) -> ReviewState:
     }
 
 
+def debate_node(state: ReviewState) -> ReviewState:
+    """单轮交叉审查：收集所有 worker findings，让各 agent 互相质疑。"""
+    # 收集预汇总 findings
+    all_findings = []
+    worker_keys = {
+        "security": "security_review",
+        "performance": "performance_review",
+        "business_logic": "business_logic_review",
+        "architecture": "architecture_review",
+    }
+    for agent_name, key in worker_keys.items():
+        review = state.get(key, {})
+        for f in (review.get("findings") or []):
+            f_copy = dict(f)
+            f_copy["_source_agent"] = agent_name
+            all_findings.append(f_copy)
+
+    if not all_findings:
+        state["pre_merged_findings"] = []
+        state["debate_results"] = []
+        return state
+
+    state["pre_merged_findings"] = all_findings
+
+    # 各 agent 交叉审查
+    debate_results = []
+    for agent_name in worker_keys:
+        try:
+            result = run_cross_review(agent_name, all_findings, state["code"])
+            debate_results.append(result)
+        except Exception:
+            pass
+
+    state["debate_results"] = debate_results
+    return state
+
+
 def build_graph() -> StateGraph:
     """构建 LangGraph 审查工作流。"""
     builder = StateGraph(ReviewState)
@@ -242,6 +307,7 @@ def build_graph() -> StateGraph:
     builder.add_node("performance_worker", performance_worker)
     builder.add_node("business_logic_worker", business_logic_worker)
     builder.add_node("architecture_worker", architecture_worker)
+    builder.add_node("debate", debate_node)
     builder.add_node("orchestrator", orchestrator)
 
     # 设置入口
@@ -253,13 +319,14 @@ def build_graph() -> StateGraph:
     builder.add_edge("start", "business_logic_worker")
     builder.add_edge("start", "architecture_worker")
 
-    # 四个 Worker 完成后 → orchestrator（LangGraph 自动等待所有前置节点完成）
-    builder.add_edge("security_worker", "orchestrator")
-    builder.add_edge("performance_worker", "orchestrator")
-    builder.add_edge("business_logic_worker", "orchestrator")
-    builder.add_edge("architecture_worker", "orchestrator")
+    # 四个 Worker 完成后 → debate（交叉审查）
+    builder.add_edge("security_worker", "debate")
+    builder.add_edge("performance_worker", "debate")
+    builder.add_edge("business_logic_worker", "debate")
+    builder.add_edge("architecture_worker", "debate")
 
-    # orchestrator → 结束
+    # debate → orchestrator → 结束
+    builder.add_edge("debate", "orchestrator")
     builder.add_edge("orchestrator", END)
 
     return builder.compile()

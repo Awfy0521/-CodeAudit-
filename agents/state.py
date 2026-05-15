@@ -17,3 +17,8 @@ class ReviewState(TypedDict):
     error: str
     status: str
     task_id: str
+    # RAG
+    chunks: list  # 代码块列表 (Chunk.to_dict())
+    # Debate
+    pre_merged_findings: list  # 预汇总 findings（辩论前）
+    debate_results: list  # 交叉审查结果

@@ -85,22 +85,26 @@ class LLMClient:
         code: str,
         lint_results: str,
         system_prompt: str,
+        extra_context: str = "",
     ) -> dict:
         """发送代码 + lint 结果给 LLM 进行审查。返回 {"content": str, "usage": dict}。"""
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": f"""## 待审查代码
+        user_content = f"""## 待审查代码
 ```python
 {code}
 ```
 
 ## 静态分析工具结果
-{lint_results if lint_results else "无静态分析结果"}
+{lint_results if lint_results else "无静态分析结果"}"""
+        if extra_context:
+            user_content += f"""
 
-请按 JSON 格式输出审查结果。""",
-            },
+{extra_context}"""
+        user_content += """
+
+请按 JSON 格式输出审查结果。"""
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
         ]
         return self.chat(messages, temperature=0.3, max_tokens=4096, json_mode=True)
 
