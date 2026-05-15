@@ -22,3 +22,5 @@ class ReviewState(TypedDict):
     # Debate
     pre_merged_findings: list  # 预汇总 findings（辩论前）
     debate_results: list  # 交叉审查结果
+    # Dependency check
+    dependency_warnings: list  # 依赖漏洞警告

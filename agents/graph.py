@@ -79,6 +79,29 @@ def start_node(state: ReviewState) -> ReviewState:
         state["code_metrics"] = run_code_metrics(state["code"])
     except Exception:
         state["code_metrics"] = {}
+    # 依赖安全检查
+    state["dependency_warnings"] = []
+    try:
+        from dependency_checker import parse, check_dependencies
+        dep_files = ["requirements.txt", "pyproject.toml", "Pipfile"]
+        for dep_file in dep_files:
+            marker = f"======= {dep_file} ========"
+            if marker in state["code"]:
+                # 提取该文件内容
+                idx = state["code"].index(marker)
+                next_idx = state["code"].find("=======", idx + len(marker))
+                if next_idx == -1:
+                    next_idx = len(state["code"])
+                file_content = state["code"][idx + len(marker) + 1:next_idx].strip()
+                packages = parse(file_content, dep_file)
+                if packages:
+                    warnings = check_dependencies(packages)
+                    if warnings:
+                        state["dependency_warnings"] = warnings
+                        print(f"[DepsCheck] 发现 {len(warnings)} 个依赖漏洞")
+                break  # 只处理第一个匹配的依赖文件
+    except Exception:
+        pass
     # RAG 索引
     try:
         from rag import index_code
@@ -122,6 +145,20 @@ def orchestrator(state: ReviewState) -> ReviewState:
         if debate_parts:
             debate_summary = "\n\n".join(debate_parts)
 
+    # 依赖漏洞警告
+    dep_text = ""
+    dep_warnings = state.get("dependency_warnings", [])
+    if dep_warnings:
+        dep_lines = []
+        for dw in dep_warnings:
+            for v in dw.get("vulnerabilities", []):
+                dep_lines.append(
+                    f"- **{dw['package_name']}@{dw['version']}** ({dw['file']}:L{dw['line']}): "
+                    f"[{v['severity']}] {v['summary']} (修复版本: {v.get('fixed_in', 'N/A')})"
+                )
+        if dep_lines:
+            dep_text = "\n".join(dep_lines)
+
     client = get_llm_client()
     try:
         user_content = f"""## 原始代码
@@ -131,6 +168,11 @@ def orchestrator(state: ReviewState) -> ReviewState:
 
 ## 各专家审查结果
 {review_summary}"""
+        if dep_text:
+            user_content += f"""
+
+## 依赖安全漏洞（OSV 查询结果）
+{dep_text}"""
         if debate_summary:
             user_content += f"""
 

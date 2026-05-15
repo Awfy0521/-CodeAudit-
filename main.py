@@ -245,6 +245,7 @@ def run_review(task_id: str, code: str, source: str, scope: str, target_path: st
             "chunks": [],
             "pre_merged_findings": [],
             "debate_results": [],
+            "dependency_warnings": [],
             "fixed_code": "",
             "diff": "",
             "token_usage": {},
