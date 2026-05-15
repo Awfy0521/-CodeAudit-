@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "WebSearch",
+      "Bash(cd D:\\\\Develop\\\\CursorWorkSpace\\\\CodeAudit *)",
+      "Bash(pip index *)",
+      "Bash(pip install *)",
+      "Bash(timeout 8 python -c ' *)",
+      "Bash(python main.py)",
+      "Bash(curl -s http://localhost:8000/docs -o /dev/null -w \"%{http_code}\")",
+      "Bash(streamlit run *)",
+      "Bash(curl -s http://localhost:8501 -o /dev/null -w \"%{http_code}\")",
+      "Bash(taskkill /F /IM python.exe /FI \"WINDOWTITLE eq *main*\")",
+      "Bash(python -c \"import subprocess, signal, os; [os.kill\\(int\\(p.split\\(\\)[1]\\), signal.SIGTERM\\) for p in subprocess.check_output\\('tasklist /FI \\\\\"IMAGENAME eq python.exe\\\\\" /FO CSV', shell=True\\).decode\\('gbk'\\).split\\('\\\\n'\\)[1:] if p.strip\\(\\)]\")",
+      "Bash(taskkill *)",
+      "Bash(cmd *)",
+      "Bash(start *)",
+      "Bash(cd /d D:\\\\Develop\\\\CursorWorkSpace\\\\CodeAudit)",
+      "Bash(curl -s http://localhost:8000/api/history)",
+      "Bash(tasklist //FI \"IMAGENAME eq python.exe\")",
+      "Bash(xxd)",
+      "Bash(python *)",
+      "Bash(gh auth *)",
+      "Bash(curl -s https://api.github.com/rate_limit)",
+      "Bash(git --version)",
+      "Bash(git init *)",
+      "Bash(git add *)"
+    ]
+  }
+}

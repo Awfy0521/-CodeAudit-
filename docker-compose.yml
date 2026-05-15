@@ -1,0 +1,23 @@
+services:
+  codeaudit:
+    build: .
+    container_name: codeaudit
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - MIMO_API_KEY=${MIMO_API_KEY:-}
+      - MIMO_MODEL=${MIMO_MODEL:-mimo-v2-pro}
+      - MIMO_BASE_URL=${MIMO_BASE_URL:-https://api.xiaomimimo.com/v1}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      - PRIMARY_PROVIDER=${PRIMARY_PROVIDER:-deepseek}
+      - DB_PATH=/data/code_review.db
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+      - TIMEOUT=${TIMEOUT:-120}
+    volumes:
+      - codeaudit_data:/data
+    restart: unless-stopped
+
+volumes:
+  codeaudit_data:

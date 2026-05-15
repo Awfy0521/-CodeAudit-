@@ -1,0 +1,1678 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智审 CodeAudit — 多智能体代码审查</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f7fa; --surface: #ffffff; --surface2: #edf1f5; --surface3: #e2e7ed;
+    --border: #dce1e7; --border-light: #e8ecf0;
+    --text: #1e293b; --text-dim: #64748b; --text-faint: #94a3b8;
+    --blue-50: #eff6ff; --blue-100: #dbeafe; --blue-200: #bfdbfe;
+    --blue-300: #93c5fd; --blue-400: #60a5fa; --blue-500: #3b82f6; --blue-600: #2563eb; --blue-700: #1d4ed8;
+    --red: #ef4444; --red-bg: #fef2f2;
+    --orange: #f97316; --orange-bg: #fff7ed;
+    --amber: #eab308; --amber-bg: #fefce8;
+    --green: #22c55e; --green-bg: #f0fdf4;
+    --purple: #8b5cf6; --purple-bg: #faf5ff;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.03);
+    --shadow-md: 0 2px 8px rgba(0,0,0,0.05), 0 1px 3px rgba(0,0,0,0.06);
+    --shadow-lg: 0 8px 32px rgba(0,0,0,0.08);
+    --radius-sm: 6px; --radius: 10px; --radius-lg: 16px; --radius-xl: 24px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+    font-size: 15px; line-height: 1.6; min-height: 100vh;
+    -webkit-font-smoothing: antialiased; overflow-x:hidden;
+  }
+
+  /* ── Top Nav ──────────────────────────── */
+  .nav {
+    position:sticky; top:0; z-index:100;
+    background: rgba(255,255,255,0.88);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid var(--border-light);
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 32px; height:56px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  }
+  .nav-left { display:flex; align-items:center; gap:28px; }
+  .nav-brand { font-family:'Cormorant Garamond',Georgia,serif; font-size:22px; font-weight:500; color:var(--blue-700); letter-spacing:0.5px; white-space:nowrap; text-decoration:none; cursor:pointer; }
+  .nav-brand span { color:var(--blue-400); font-weight:400; }
+  .nav-links { display:flex; gap:4px; list-style:none; }
+  .nav-links a { text-decoration:none; color:var(--text-dim); font-size:13px; font-weight:500; padding:6px 16px; border-radius:20px; transition:all 0.2s; letter-spacing:0.3px; cursor:pointer; }
+  .nav-links a:hover { color:var(--text); background:var(--surface2); }
+  .nav-links a.active { color:var(--blue-600); background:var(--blue-50); }
+  .nav-status { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-dim); }
+  .nav-dot { width:7px; height:7px; border-radius:50%; background:var(--green); }
+  .nav-dot.off { background:var(--red); }
+
+  /* ── Stage Bar (3-step workflow) ──────── */
+  .stage-bar-wrap { display:none; position:sticky; top:56px; z-index:99; }
+  .stage-bar-wrap.show { display:block; }
+  .stage-bar {
+    background: rgba(255,255,255,0.8); backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border-light);
+    padding:0 32px; height:52px;
+    display:flex; align-items:center; justify-content:center; gap:0;
+  }
+  .stage-item { display:flex; align-items:center; gap:8px; padding:8px 20px; border-radius:24px; font-size:13px; font-weight:500; color:var(--text-faint); cursor:default; transition:all 0.25s; white-space:nowrap; }
+  .stage-item.done { color:var(--text-dim); cursor:pointer; }
+  .stage-item.done:hover { color:var(--blue-600); background:var(--blue-50); }
+  .stage-item.active { color:var(--blue-600); background:var(--blue-50); font-weight:600; }
+  .stage-num { width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; border:2px solid var(--border); color:var(--text-faint); background:var(--surface); transition:all 0.25s; flex-shrink:0; }
+  .stage-item.done .stage-num { border-color:var(--green); background:var(--green-bg); color:var(--green); }
+  .stage-item.active .stage-num { border-color:var(--blue-500); background:var(--blue-50); color:var(--blue-600); }
+  .stage-connector { width:48px; height:2px; background:var(--border); margin:0 4px; flex-shrink:0; transition:background 0.3s; }
+  .stage-connector.done { background:var(--green); }
+  @media(max-width:750px){
+    .stage-bar { padding:0 12px; }
+    .stage-item { padding:6px 10px; font-size:11px; gap:4px; }
+    .stage-num { width:22px; height:22px; font-size:10px; }
+    .stage-connector { width:24px; }
+  }
+
+  /* ── Pages ─────────────────────────────── */
+  .page { display:none; position:relative; z-index:1; animation: fadeIn 0.35s ease; }
+  .page.active { display:block; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(12px);} to{opacity:1;transform:translateY(0);} }
+
+  /* ═══════════ HOME PAGE ═══════════ */
+  .home-hero {
+    position:relative; overflow:hidden;
+    background: linear-gradient(160deg, #f0f6fb 0%, #e8f0f8 30%, #f4f7fa 60%, #eef3f8 100%);
+    padding:80px 32px 64px; text-align:center;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .home-hero::before {
+    content:''; position:absolute; inset:0;
+    background:
+      radial-gradient(circle at 25% 30%, rgba(59,130,246,0.06) 0%, transparent 50%),
+      radial-gradient(circle at 75% 70%, rgba(139,92,246,0.05) 0%, transparent 50%),
+      radial-gradient(circle at 60% 20%, rgba(34,197,94,0.04) 0%, transparent 40%);
+    pointer-events:none;
+  }
+  .home-hero .hero-badge {
+    display:inline-block; padding:5px 16px; border-radius:20px;
+    background:var(--blue-50); color:var(--blue-600);
+    font-size:11px; font-weight:600; letter-spacing:0.8px; text-transform:uppercase;
+    margin-bottom:24px; position:relative;
+  }
+  .home-hero .hero-title {
+    font-family:'Noto Serif SC','Cormorant Garamond',Georgia,serif;
+    font-size:clamp(28px,5vw,44px); font-weight:600;
+    color:var(--text); letter-spacing:1px; line-height:1.3;
+    position:relative; margin-bottom:16px;
+  }
+  .home-hero .hero-title .hl { color:var(--blue-600); }
+  .home-hero .hero-sub {
+    font-size:16px; color:var(--text-dim); max-width:560px; margin:0 auto 36px;
+    line-height:1.7; position:relative;
+  }
+  .home-hero .hero-btn {
+    display:inline-block; padding:14px 48px; border-radius:28px;
+    background:var(--blue-500); color:#fff; font-size:15px; font-weight:600;
+    cursor:pointer; border:none; letter-spacing:0.5px;
+    box-shadow:0 4px 20px rgba(59,130,246,0.3);
+    transition:all 0.25s; position:relative; text-decoration:none;
+    font-family:inherit;
+  }
+  .home-hero .hero-btn:hover {
+    background:var(--blue-600); transform:translateY(-2px);
+    box-shadow:0 8px 30px rgba(59,130,246,0.4);
+  }
+
+  /* Floating code shapes */
+  .hero-shapes { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+  .hero-shape {
+    position:absolute; border-radius:var(--radius); opacity:0.5;
+    font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-faint);
+    animation: floatShape 20s infinite linear;
+  }
+  @keyframes floatShape {
+    0% { transform:translateY(0) rotate(0deg); opacity:0.3; }
+    25% { transform:translateY(-30px) rotate(2deg); opacity:0.6; }
+    50% { transform:translateY(-15px) rotate(-1deg); opacity:0.4; }
+    75% { transform:translateY(-40px) rotate(1deg); opacity:0.5; }
+    100% { transform:translateY(0) rotate(0deg); opacity:0.3; }
+  }
+
+  /* Feature section */
+  .home-section { max-width:1100px; margin:0 auto; padding:64px 24px; }
+  .section-title {
+    font-family:'Noto Serif SC','Cormorant Garamond',Georgia,serif;
+    font-size:24px; font-weight:600; text-align:center; margin-bottom:8px; letter-spacing:0.5px;
+  }
+  .section-sub { text-align:center; font-size:14px; color:var(--text-dim); margin-bottom:40px; }
+
+  .feature-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
+  @media(max-width:800px){ .feature-grid{grid-template-columns:1fr; max-width:400px; margin:0 auto; } }
+  .feature-card {
+    background:var(--surface); border:1px solid var(--border-light); border-radius:var(--radius-lg);
+    padding:32px 24px; text-align:center; transition:all 0.3s; position:relative; overflow:hidden;
+  }
+  .feature-card::after {
+    content:''; position:absolute; bottom:0; left:20%; right:20%; height:3px; border-radius:3px;
+    transition:all 0.3s;
+  }
+  .feature-card:hover { box-shadow:var(--shadow-lg); transform:translateY(-4px); }
+  .feature-card:nth-child(1)::after { background:var(--red); }
+  .feature-card:nth-child(2)::after { background:var(--orange); }
+  .feature-card:nth-child(3)::after { background:var(--purple); }
+  .feature-card:hover::after { left:8%; right:8%; }
+  .fc-icon { font-size:40px; margin-bottom:16px; display:block; }
+  .fc-name { font-size:16px; font-weight:600; margin-bottom:8px; color:var(--text); }
+  .fc-desc { font-size:13px; color:var(--text-dim); line-height:1.6; }
+  .fc-tags { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:14px; }
+  .fc-tag { padding:3px 10px; border-radius:12px; font-size:10px; font-weight:500; letter-spacing:0.3px; }
+  .tag-sec { background:var(--red-bg); color:var(--red); }
+  .tag-perf { background:var(--orange-bg); color:var(--orange); }
+  .tag-biz { background:var(--purple-bg); color:var(--purple); }
+
+  /* ── Detailed workflow pipeline ─────────── */
+  .flow-section { padding:64px 24px 80px; background:linear-gradient(180deg, #f8fafc 0%, #f0f4f8 40%, #f8fafc 100%); border-top:1px solid var(--border-light); border-bottom:1px solid var(--border-light); position:relative; overflow:hidden; }
+  .flow-section::before {
+    content:''; position:absolute; inset:0;
+    background:
+      radial-gradient(circle at 20% 30%, rgba(59,130,246,0.04) 0%, transparent 50%),
+      radial-gradient(circle at 80% 60%, rgba(139,92,246,0.03) 0%, transparent 50%),
+      radial-gradient(circle at 50% 80%, rgba(34,197,94,0.03) 0%, transparent 50%);
+    pointer-events:none;
+  }
+  .flow-header { text-align:center; margin-bottom:56px; position:relative; z-index:1; }
+  .flow-header .fh-title { font-family:'Noto Serif SC','Cormorant Garamond',Georgia,serif; font-size:26px; font-weight:600; color:var(--text); }
+  .flow-header .fh-sub { font-size:14px; color:var(--text-dim); margin-top:8px; }
+  /* mini pipeline overview */
+  .flow-pipeline { max-width:1100px; margin:0 auto 56px; display:flex; align-items:center; justify-content:center; gap:0; flex-wrap:wrap; position:relative; z-index:1; }
+  .fl-pipe-step { display:flex; align-items:center; gap:6px; padding:8px 14px; background:var(--surface); border:1px solid var(--border-light); border-radius:20px; font-size:11px; font-weight:500; color:var(--text-dim); white-space:nowrap; box-shadow:var(--shadow-sm); transition:all 0.2s; }
+  .fl-pipe-step:hover { transform:translateY(-2px); box-shadow:var(--shadow-md); color:var(--text); }
+  .fl-pipe-step .fl-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .fl-pipe-arrow { font-size:16px; color:var(--blue-300); margin:0 2px; flex-shrink:0; }
+  @media(max-width:900px){ .flow-pipeline{ gap:6px; } .fl-pipe-step{ font-size:10px; padding:6px 10px; } .fl-pipe-arrow{ margin:0 0px; font-size:12px; } }
+  /* main timeline */
+  .flow-track { max-width:1000px; margin:0 auto; position:relative; z-index:1; }
+  .flow-track::before {
+    content:''; position:absolute; left:36px; top:12px; bottom:12px; width:2px;
+    background:linear-gradient(180deg,
+      var(--blue-400) 0%,
+      var(--blue-400) 14%,
+      var(--blue-300) 14%, var(--blue-300) 28%,
+      var(--orange) 28%, var(--orange) 42%,
+      var(--purple) 42%, var(--purple) 56%,
+      var(--blue-500) 56%, var(--blue-500) 70%,
+      var(--green) 70%, var(--green) 84%,
+      var(--blue-400) 84%, var(--blue-400) 100%
+    );
+    border-radius:1px;
+  }
+  .flow-step { display:flex; gap:28px; margin-bottom:48px; position:relative; }
+  .flow-step:last-child { margin-bottom:0; }
+  .flow-step .fs-marker {
+    width:72px; height:72px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:28px; flex-shrink:0; z-index:1;
+    border:3px solid var(--border); background:var(--surface);
+    box-shadow:var(--shadow-md); transition:all 0.35s;
+    position:relative;
+  }
+  .flow-step .fs-marker::after {
+    content:attr(data-step); position:absolute; top:-6px; right:-6px;
+    width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:10px; font-weight:700; color:#fff; background:var(--blue-500);
+    font-family:'IBM Plex Sans',sans-serif;
+  }
+  .flow-step:hover .fs-marker { transform:scale(1.08); box-shadow:var(--shadow-lg); }
+  /* step colors */
+  .flow-step.s1 .fs-marker { border-color:var(--blue-400); background:linear-gradient(135deg, #eff6ff, #dbeafe); }
+  .flow-step.s1 .fs-marker::after { background:var(--blue-500); }
+  .flow-step.s2 .fs-marker { border-color:#6366f1; background:linear-gradient(135deg, #eef2ff, #e0e7ff); }
+  .flow-step.s2 .fs-marker::after { background:#6366f1; }
+  .flow-step.s3 .fs-marker { border-color:var(--amber); background:linear-gradient(135deg, #fefce8, #fef9c3); }
+  .flow-step.s3 .fs-marker::after { background:var(--amber); }
+  .flow-step.s4 .fs-marker { border-color:var(--orange); background:linear-gradient(135deg, #fff7ed, #ffedd5); }
+  .flow-step.s4 .fs-marker::after { background:var(--orange); }
+  .flow-step.s5 .fs-marker { border-color:var(--purple); background:linear-gradient(135deg, #faf5ff, #f3e8ff); }
+  .flow-step.s5 .fs-marker::after { background:var(--purple); }
+  .flow-step.s6 .fs-marker { border-color:var(--green); background:linear-gradient(135deg, #f0fdf4, #dcfce7); }
+  .flow-step.s6 .fs-marker::after { background:var(--green); }
+  .flow-step.s7 .fs-marker { border-color:var(--blue-600); background:linear-gradient(135deg, #eff6ff, #bfdbfe); }
+  .flow-step.s7 .fs-marker::after { background:var(--blue-600); }
+  .fs-body { flex:1; padding-top:6px; }
+  .fs-body .fs-title { font-size:16px; font-weight:600; color:var(--text); margin-bottom:4px; letter-spacing:0.2px; }
+  .fs-body .fs-desc { font-size:13px; color:var(--text-dim); line-height:1.7; }
+  .fs-body .fs-detail { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+  .fs-body .fs-tag { font-size:10.5px; padding:3px 10px; border-radius:12px; font-weight:500; letter-spacing:0.3px; }
+  .fs-tag.blue { background:var(--blue-50); color:var(--blue-600); }
+  .fs-tag.indigo { background:#eef2ff; color:#4f46e5; }
+  .fs-tag.amber { background:var(--amber-bg); color:#a16207; }
+  .fs-tag.orange { background:var(--orange-bg); color:#c2410c; }
+  .fs-tag.purple { background:var(--purple-bg); color:var(--purple); }
+  .fs-tag.green { background:var(--green-bg); color:#15803d; }
+  /* Branching sub-steps for AgentTeam */
+  .fs-branches { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:14px; }
+  @media(max-width:650px){ .fs-branches{grid-template-columns:1fr;} }
+  .fs-branch {
+    background:var(--surface); border-radius:var(--radius); padding:16px;
+    border-left:4px solid var(--border); box-shadow:var(--shadow-sm);
+    transition:all 0.25s; position:relative; overflow:hidden;
+  }
+  .fs-branch::after {
+    content:''; position:absolute; top:0; right:0; bottom:0; width:3px;
+  }
+  .fs-branch:nth-child(1) { border-left-color:var(--red); }
+  .fs-branch:nth-child(2) { border-left-color:var(--amber); }
+  .fs-branch:nth-child(3) { border-left-color:var(--purple); }
+  .fs-branch:hover { transform:translateY(-3px); box-shadow:var(--shadow-lg); }
+  .fs-branch .fsb-icon { font-size:22px; margin-bottom:4px; }
+  .fs-branch .fsb-name { font-size:13px; font-weight:600; color:var(--text); margin-bottom:2px; }
+  .fs-branch .fsb-desc { font-size:11px; color:var(--text-dim); line-height:1.5; }
+  .fs-branch .fsb-meta { font-size:10px; color:var(--text-faint); margin-top:6px; display:flex; align-items:center; gap:4px; }
+  /* step connector arrow between steps */
+  .fs-connector { position:absolute; left:36px; bottom:-36px; width:2px; height:24px; background:var(--border-light); display:none; }
+  @media(max-width:700px){
+    .flow-track::before { left:28px; }
+    .flow-step .fs-marker { width:56px; height:56px; font-size:22px; }
+    .flow-step .fs-marker::after { width:18px; height:18px; font-size:9px; top:-4px; right:-4px; }
+    .flow-step { gap:18px; }
+  }
+
+  /* ── Cards ─────────────────────────────── */
+  .card { background:var(--surface); border:1px solid var(--border-light); border-radius:var(--radius-lg); padding:28px; margin-bottom:20px; box-shadow:var(--shadow-sm); transition:box-shadow 0.2s; }
+  .card:hover { box-shadow:var(--shadow-md); }
+  .card-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid var(--border-light); }
+  .card-title { font-family:'Noto Serif SC','Cormorant Garamond',Georgia,serif; font-size:20px; font-weight:500; letter-spacing:0.3px; }
+
+  /* ── Mode Selector ─────────────────────── */
+  .mode-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:24px; }
+  @media(max-width:750px){ .mode-grid{grid-template-columns:1fr;} }
+  .mode-card { background:var(--surface); border:1px solid var(--border-light); border-radius:var(--radius-lg); padding:20px; cursor:pointer; transition:all 0.25s; position:relative; }
+  .mode-card:hover { box-shadow:var(--shadow-md); transform:translateY(-2px); }
+  .mode-card.active { border-color:var(--blue-300); box-shadow:0 0 0 1px var(--blue-200),var(--shadow-md); background:linear-gradient(135deg,var(--blue-50) 0%,var(--surface) 100%); }
+  .mode-card .mode-icon { font-size:24px; margin-bottom:10px; display:block; }
+  .mode-card .mode-name { font-size:14px; font-weight:600; color:var(--text); margin-bottom:4px; }
+  .mode-card .mode-desc { font-size:11px; color:var(--text-dim); line-height:1.5; }
+  .mode-card .mode-check { position:absolute; top:12px; right:14px; width:20px; height:20px; border-radius:50%; border:2px solid var(--border); transition:all 0.2s; }
+  .mode-card.active .mode-check { border-color:var(--blue-500); background:var(--blue-500); }
+  .mode-card.active .mode-check::after { content:'✓'; position:absolute; top:-1px; left:3px; color:#fff; font-size:12px; font-weight:700; }
+
+  /* ── Inputs ────────────────────────────── */
+  .input-section { display:none; }
+  .input-section.active { display:block; }
+  .field-group { margin-bottom:14px; }
+  .field-label { display:block; font-size:11px; font-weight:500; color:var(--text-dim); letter-spacing:0.5px; text-transform:uppercase; margin-bottom:6px; }
+  .field-input { width:100%; padding:10px 14px; border:1px solid var(--border); border-radius:var(--radius-sm); font-size:13px; font-family:'JetBrains Mono',monospace; outline:none; transition:border-color 0.2s; background:var(--surface); }
+  .field-input:focus { border-color:var(--blue-300); }
+  .field-input::placeholder { color:var(--text-faint); }
+  .local-tabs { display:flex; gap:4px; margin-bottom:12px; }
+  .local-tab { padding:6px 16px; border-radius:20px; border:none; background:none; cursor:pointer; font-size:12px; font-weight:500; color:var(--text-dim); font-family:inherit; transition:all 0.2s; }
+  .local-tab:hover { background:var(--surface2); color:var(--text); }
+  .local-tab.active { background:var(--blue-50); color:var(--blue-600); }
+  .code-area-wrap { position:relative; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; background:var(--surface); transition:border-color 0.2s; }
+  .code-area-wrap:focus-within { border-color:var(--blue-300); }
+  .code-textarea { width:100%; min-height:240px; border:none; outline:none; resize:vertical; padding:16px 16px 16px 52px; font-family:'JetBrains Mono',monospace; font-size:13px; line-height:1.65; color:var(--text); tab-size:4; background:transparent; }
+  .code-textarea::placeholder { color:var(--text-faint); }
+  .line-numbers-overlay { position:absolute; left:0; top:0; bottom:0; width:38px; padding:16px 0; font-family:'JetBrains Mono',monospace; font-size:13px; line-height:1.65; color:var(--text-faint); text-align:right; background:var(--surface2); border-right:1px solid var(--border-light); user-select:none; overflow:hidden; pointer-events:none; }
+  .line-numbers-overlay pre { padding:0 8px 0 0; margin:0; }
+  .upload-zone { cursor:pointer; transition:border-color 0.2s,background 0.2s; }
+  .upload-zone:hover { background:var(--blue-50); }
+  .btn { padding:10px 28px; border-radius:24px; font-size:13px; font-weight:500; cursor:pointer; transition:all 0.2s; border:none; font-family:inherit; letter-spacing:0.3px; }
+  .btn-primary { background:var(--blue-500); color:#fff; box-shadow:0 2px 8px rgba(59,130,246,0.25); }
+  .btn-primary:hover { background:var(--blue-600); box-shadow:0 4px 14px rgba(59,130,246,0.35); transform:translateY(-1px); }
+  .btn-primary:disabled { opacity:0.4; cursor:not-allowed; transform:none; box-shadow:none; }
+  .btn-ghost { background:transparent; color:var(--text-dim); padding:8px 16px; }
+  .btn-ghost:hover { color:var(--text); background:var(--surface2); }
+  .btn-outline { background:transparent; color:var(--blue-600); border:2px solid var(--blue-300); padding:10px 28px; border-radius:24px; font-size:13px; font-weight:500; cursor:pointer; transition:all 0.2s; font-family:inherit; letter-spacing:0.3px; }
+  .btn-outline:hover { background:var(--blue-50); border-color:var(--blue-500); }
+
+  /* ── Progress Page ─────────────────────── */
+  .progress-timer { text-align:center; margin-bottom:20px; }
+  .progress-timer .pt-time { font-family:'JetBrains Mono',monospace; font-size:28px; color:var(--blue-500); font-weight:300; }
+  .progress-timer .pt-msg { font-size:12px; color:var(--text-dim); margin-top:2px; }
+
+  /* 7-step pipeline bar */
+  .prog-pipeline { display:flex; align-items:center; justify-content:center; gap:0; margin-bottom:24px; padding:16px 20px; background:var(--surface); border:1px solid var(--border-light); border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); overflow-x:auto; }
+  .pp-step { display:flex; flex-direction:column; align-items:center; gap:4px; min-width:56px; flex-shrink:0; transition:all 0.4s; opacity:0.35; position:relative; }
+  .pp-step.done { opacity:1; }
+  .pp-step.active { opacity:1; }
+  .pp-step .pp-icon { font-size:20px; transition:transform 0.3s; }
+  .pp-step.active .pp-icon { animation: agentBounce 0.7s infinite alternate; transform:scale(1.15); }
+  .pp-step .pp-label { font-size:10px; font-weight:500; color:var(--text-dim); letter-spacing:0.3px; text-align:center; white-space:nowrap; }
+  .pp-step.active .pp-label { color:var(--blue-600); font-weight:600; }
+  .pp-step.done .pp-label { color:var(--text-dim); }
+  .pp-step .pp-dot { width:10px; height:10px; border-radius:50%; transition:all 0.4s; }
+  .pp-step .pp-dot.waiting { background:var(--border); }
+  .pp-step.done .pp-dot { background:var(--green); }
+  .pp-step.active .pp-dot { background:var(--blue-500); box-shadow:0 0 0 4px rgba(59,130,246,0.2); }
+  .pp-arrow { font-size:14px; color:var(--border); margin:0 2px; flex-shrink:0; transition:color 0.4s; margin-bottom:16px; }
+  .pp-arrow.done { color:var(--green); }
+  @media(max-width:800px){ .prog-pipeline{ gap:0; padding:12px 8px; } .pp-step{ min-width:42px; } .pp-step .pp-label{ font-size:8px; } .pp-arrow{ font-size:10px; } }
+
+  /* Stage detail card */
+  .stage-detail-card { background:var(--surface); border:1px solid var(--border-light); border-radius:var(--radius-lg); padding:16px 20px; margin-bottom:20px; transition:all 0.4s; display:flex; align-items:center; gap:14px; box-shadow:var(--shadow-sm); }
+  .stage-detail-card .sdc-icon { font-size:32px; flex-shrink:0; }
+  .stage-detail-card .sdc-info { flex:1; }
+  .stage-detail-card .sdc-title { font-size:14px; font-weight:600; color:var(--text); }
+  .stage-detail-card .sdc-desc { font-size:11px; color:var(--text-dim); margin-top:2px; }
+  .stage-detail-card .sdc-status { font-size:10px; font-weight:500; padding:3px 10px; border-radius:12px; letter-spacing:0.3px; }
+  .sdc-status.waiting { background:var(--surface2); color:var(--text-faint); }
+  .sdc-status.running { background:var(--blue-50); color:var(--blue-600); }
+  .sdc-status.done { background:var(--green-bg); color:var(--green); }
+
+  /* Main progress content grid */
+  .progress-layout { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px; }
+  @media(max-width:900px){ .progress-layout{grid-template-columns:1fr;} }
+
+  /* Code preview panel */
+  .code-preview-panel { background:var(--surface); border:1px solid var(--border-light); border-radius:var(--radius-lg); overflow:hidden; display:flex; flex-direction:column; }
+  .code-preview-header { display:flex; align-items:center; justify-content:space-between; padding:12px 18px; border-bottom:1px solid var(--border-light); background:var(--surface2); }
+  .code-preview-header .cp-title { font-size:12px; font-weight:600; color:var(--text-dim); letter-spacing:0.5px; text-transform:uppercase; }
+  .code-preview-header .cp-meta { font-size:10px; color:var(--text-faint); }
+  .code-preview-body { flex:1; overflow-y:auto; max-height:380px; padding:0; font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.7; color:var(--text); }
+  .code-preview-body .file-marker { color:var(--blue-500); font-weight:600; display:block; padding:6px 16px; background:var(--surface2); border-bottom:1px solid var(--border-light); }
+  .code-preview-body .code-line { display:flex; padding:0; min-height:1.7em; border-bottom:1px solid rgba(0,0,0,0.02); transition:background 0.4s; }
+  .code-preview-body .code-line .cl-num { width:38px; min-width:38px; text-align:right; padding:2px 6px; color:var(--text-faint); background:var(--surface2); user-select:none; font-size:10px; border-right:1px solid var(--border-light); }
+  .code-preview-body .code-line .cl-text { padding:2px 10px; white-space:pre; flex:1; overflow-x:auto; }
+  .code-preview-body .code-line .cl-issue-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; margin:3px 2px 0 4px; display:none; }
+  .code-preview-body .code-line .cl-issue-dot.show { display:block; }
+  .cl-issue-dot.dot-sec { background:var(--red); }
+  .cl-issue-dot.dot-perf { background:var(--orange); }
+  .cl-issue-dot.dot-biz { background:var(--purple); }
+  /* Agent scan colors */
+  .code-preview-body .code-line.scan-security { background:rgba(239,68,68,0.08); }
+  .code-preview-body .code-line.scan-security .cl-num { background:rgba(239,68,68,0.14); color:var(--red); font-weight:600; }
+  .code-preview-body .code-line.scan-performance { background:rgba(249,115,22,0.08); }
+  .code-preview-body .code-line.scan-performance .cl-num { background:rgba(249,115,22,0.14); color:var(--orange); font-weight:600; }
+  .code-preview-body .code-line.scan-business { background:rgba(139,92,246,0.08); }
+  .code-preview-body .code-line.scan-business .cl-num { background:rgba(139,92,246,0.14); color:var(--purple); font-weight:600; }
+  /* Issue left-border markers */
+  .code-preview-body .code-line.issue-security { border-left:3px solid var(--red); }
+  .code-preview-body .code-line.issue-performance { border-left:3px solid var(--orange); }
+  .code-preview-body .code-line.issue-business { border-left:3px solid var(--purple); }
+  /* Agent legend */
+  .agent-legend { display:flex; gap:14px; padding:8px 14px; background:var(--surface2); border-top:1px solid var(--border-light); flex-wrap:wrap; }
+  .agent-legend .legend-item { display:flex; align-items:center; gap:5px; font-size:10px; color:var(--text-dim); }
+  .agent-legend .legend-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .legend-dot.ld-sec { background:var(--red); }
+  .legend-dot.ld-perf { background:var(--orange); }
+  .legend-dot.ld-biz { background:var(--purple); }
+
+  /* AgentTeam panel */
+  .team-panel { background:var(--surface); border:1px solid var(--border-light); border-radius:var(--radius-lg); padding:20px; transition:opacity 0.4s; }
+  .team-panel.dimmed { opacity:0.3; pointer-events:none; }
+  .team-title { text-align:center; font-family:'Noto Serif SC','Cormorant Garamond',Georgia,serif; font-size:18px; font-weight:500; color:var(--text); margin-bottom:4px; }
+  .team-subtitle { text-align:center; font-size:11px; color:var(--text-dim); margin-bottom:18px; letter-spacing:0.5px; }
+  .team-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:16px; }
+  @media(max-width:500px){ .team-grid{grid-template-columns:1fr;} }
+  .agent-card { background:var(--surface); border:2px solid var(--border-light); border-radius:var(--radius); padding:16px; text-align:center; transition:all 0.4s; position:relative; overflow:hidden; }
+  .agent-card.running { border-color:var(--blue-300); }
+  .agent-card.done { border-color:var(--green); }
+  .agent-icon { font-size:28px; margin-bottom:6px; display:block; transition:transform 0.3s; }
+  .agent-card.running .agent-icon { animation: agentBounce 0.6s infinite alternate; }
+  @keyframes agentBounce { from{transform:translateY(0);} to{transform:translateY(-6px);} }
+  .agent-name { font-size:13px; font-weight:600; color:var(--text); margin-bottom:2px; }
+  .agent-role { font-size:10px; color:var(--text-faint); letter-spacing:0.3px; margin-bottom:8px; }
+  .agent-findings { font-size:22px; font-weight:600; color:var(--text-dim); min-height:28px; transition:color 0.3s; }
+  .agent-findings.has-findings { color:var(--red); }
+  .agent-findings.clean { color:var(--green); }
+  .agent-label { font-size:9px; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.5px; }
+
+  .orch-row { display:flex; justify-content:center; }
+  .orch-card { background:var(--surface); border:2px solid var(--border-light); border-radius:var(--radius); padding:14px 28px; text-align:center; transition:all 0.4s; min-width:200px; }
+  .orch-card.running { border-color:var(--purple); }
+  .orch-card.done { border-color:var(--green); }
+  .orch-card .agent-icon { font-size:24px; }
+  .orch-connectors { display:flex; justify-content:center; gap:40px; margin-bottom:4px; }
+  .orch-conn { width:2px; height:18px; background:var(--border); transition:background 0.4s; }
+  .orch-conn.done { background:var(--green); }
+  .orch-conn.running { background:var(--blue-300); }
+  .orch-findings { font-size:13px; font-weight:500; color:var(--text-dim); margin-top:4px; }
+
+  /* ── Results ───────────────────────────── */
+  .overview-card { background:linear-gradient(135deg,var(--blue-50) 0%,var(--surface) 100%); border:1px solid var(--blue-100); border-radius:var(--radius-lg); padding:24px; margin-bottom:16px; }
+  .overview-card .oc-title { font-family:'Noto Serif SC','Cormorant Garamond',Georgia,serif; font-size:18px; font-weight:500; color:var(--blue-700); margin-bottom:8px; }
+  .overview-card .oc-text { font-size:14px; color:var(--blue-800); line-height:1.7; font-style:italic; }
+  .overview-card .oc-meta { display:flex; gap:20px; margin-top:12px; font-size:11px; color:var(--blue-400); font-weight:500; letter-spacing:0.3px; flex-wrap:wrap; }
+  .summary-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px; }
+  @media(max-width:600px){ .summary-grid{grid-template-columns:repeat(2,1fr);} }
+  .summary-item { background:var(--surface); border:1px solid var(--border-light); border-radius:var(--radius); padding:16px; text-align:center; }
+  .summary-item .si-label { font-size:10px; font-weight:500; letter-spacing:1px; color:var(--text-dim); text-transform:uppercase; margin-bottom:6px; }
+  .summary-item .si-value { font-size:15px; font-weight:600; }
+
+  /* Finding cards */
+  .finding { background:var(--surface); border:1px solid var(--border-light); border-radius:var(--radius); margin-bottom:10px; overflow:hidden; transition:all 0.2s; }
+  .finding:hover { box-shadow:var(--shadow-md); }
+  .finding-header { display:flex; align-items:center; gap:12px; padding:14px 18px; cursor:pointer; font-size:13px; font-weight:500; user-select:none; }
+  .finding-header:hover { background:var(--surface2); }
+  .finding-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+  .dot-critical { background:var(--red); box-shadow:0 0 0 3px rgba(239,68,68,0.2); }
+  .dot-high { background:var(--orange); box-shadow:0 0 0 3px rgba(249,115,22,0.2); }
+  .dot-medium { background:var(--amber); box-shadow:0 0 0 3px rgba(234,179,8,0.2); }
+  .dot-low { background:var(--green); box-shadow:0 0 0 3px rgba(34,197,94,0.2); }
+  .finding-body { display:none; padding:0 18px 18px 40px; }
+  .finding.expanded .finding-body { display:block; }
+  .finding-body .f-row { margin-bottom:10px; }
+  .finding-body .f-label { font-size:10px; font-weight:600; color:var(--text-faint); letter-spacing:0.8px; text-transform:uppercase; margin-bottom:3px; }
+  .finding-body .f-desc { font-size:14px; color:var(--text); line-height:1.6; }
+  .finding-body .f-suggestion { font-size:13px; color:var(--blue-600); line-height:1.6; padding:10px 14px; background:var(--blue-50); border-radius:var(--radius-sm); border-left:3px solid var(--blue-300); }
+  .finding-body .f-code { background:#1e293b; border-radius:var(--radius-sm); margin-top:4px; font-family:'JetBrains Mono',monospace; font-size:13px; line-height:1.65; color:#e2e8f0; overflow-x:auto; display:flex; }
+  .f-code .fc-ln-col { display:flex; flex-direction:column; background:rgba(0,0,0,0.2); padding:12px 0; user-select:none; text-align:right; min-width:44px; border-right:1px solid rgba(255,255,255,0.06); }
+  .f-code .fc-ln-col span { padding:0 10px; font-size:11px; color:#64748b; line-height:1.65; }
+  .f-code .fc-ln-col span.hl { color:#f87171; background:rgba(239,68,68,0.12); font-weight:600; }
+  .f-code .fc-code-col { padding:12px 14px; white-space:pre; flex:1; }
+  .finding-body .f-meta { font-size:10px; color:var(--text-faint); margin-top:8px; letter-spacing:0.5px; display:flex; gap:12px; flex-wrap:wrap; }
+  .tag { padding:2px 8px; border-radius:10px; font-size:9px; font-weight:500; letter-spacing:0.3px; }
+  .tag-critical { background:var(--red-bg); color:var(--red); }
+  .tag-high { background:var(--orange-bg); color:var(--orange); }
+  .tag-medium { background:var(--amber-bg); color:var(--amber); }
+  .tag-low { background:var(--green-bg); color:var(--green); }
+
+  /* Tabs */
+  .tab-bar { display:flex; gap:0; border-bottom:1px solid var(--border-light); margin-bottom:16px; overflow-x:auto; }
+  .tab-btn { padding:10px 20px; border:none; background:none; font-size:12px; font-weight:500; cursor:pointer; color:var(--text-dim); border-bottom:2px solid transparent; transition:all 0.2s; font-family:inherit; letter-spacing:0.3px; white-space:nowrap; }
+  .tab-btn:hover { color:var(--text); }
+  .tab-btn.active { color:var(--blue-600); border-bottom-color:var(--blue-500); }
+  .tab-pane { display:none; }
+  .tab-pane.active { display:block; }
+
+  /* Side-by-side Diff */
+  .diff-sxs { display:grid; grid-template-columns:1fr 1fr; gap:0; border:1px solid var(--border-light); border-radius:var(--radius); overflow:hidden; font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.7; }
+  @media(max-width:700px){ .diff-sxs{grid-template-columns:1fr;} }
+  .diff-sxs-header { padding:10px 16px; font-weight:600; font-size:11px; letter-spacing:0.5px; }
+  .diff-sxs-header.left { background:var(--red-bg); color:var(--red); }
+  .diff-sxs-header.right { background:var(--green-bg); color:var(--green); }
+  .diff-sxs-cell { padding:3px 16px; white-space:pre-wrap; min-height:1.7em; border-bottom:1px solid rgba(0,0,0,0.03); }
+  .diff-sxs-cell.rem { background:rgba(239,68,68,0.06); color:#b91c1c; }
+  .diff-sxs-cell.add { background:rgba(34,197,94,0.06); color:#15803d; }
+  .diff-sxs-cell.empty { background:var(--surface2); }
+  .diff-sxs-cell.ctx { color:var(--text-dim); }
+  .fixed-code-block { background:#1e293b; border-radius:var(--radius); overflow:hidden; }
+  .fixed-code-block pre { margin:0; padding:20px; font-family:'JetBrains Mono',monospace; font-size:13px; line-height:1.7; overflow-x:auto; color:#e2e8f0; }
+
+  /* ── History ───────────────────────────── */
+  .history-grid { display:grid; gap:12px; }
+  .history-card { background:var(--surface); border:1px solid var(--border-light); border-radius:var(--radius-lg); padding:20px 24px; cursor:pointer; transition:all 0.2s; display:grid; grid-template-columns:1fr auto auto; align-items:center; gap:16px; }
+  .history-card:hover { box-shadow:var(--shadow-md); border-color:var(--blue-200); }
+  .hc-main { min-width:0; }
+  .hc-date { font-size:11px; color:var(--text-dim); letter-spacing:0.3px; }
+  .hc-source { font-size:10px; color:var(--blue-400); font-weight:500; letter-spacing:0.5px; }
+  .hc-path { font-size:14px; font-weight:500; color:var(--text); }
+  .hc-preview { font-size:12px; color:var(--text-dim); margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:400px; font-family:'JetBrains Mono',monospace; }
+  .hc-status { font-size:11px; font-weight:500; padding:4px 12px; border-radius:20px; letter-spacing:0.5px; }
+  .status-completed { background:var(--green-bg); color:var(--green); }
+  .status-failed { background:var(--red-bg); color:var(--red); }
+  .status-reviewing { background:var(--amber-bg); color:var(--amber); }
+  .empty-state { text-align:center; padding:64px 24px; }
+  .empty-state .es-icon { font-size:48px; color:var(--text-faint); margin-bottom:12px; }
+  .empty-state .es-title { font-family:'Noto Serif SC','Cormorant Garamond',Georgia,serif; font-size:22px; color:var(--text-dim); }
+  .empty-state .es-sub { font-size:13px; color:var(--text-faint); margin-top:4px; }
+
+  /* Results "done" button area */
+  .results-footer { text-align:center; padding:24px 0 8px; }
+
+  @media(max-width:700px){
+    .nav { padding:0 16px; } .nav-brand { font-size:18px; }
+    .page { padding:20px 12px 48px; }
+    .home-hero { padding:48px 20px 40px; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-left">
+    <div class="nav-brand" onclick="goHome()">智审 <span>·</span> CodeAudit</div>
+    <ul class="nav-links">
+      <li><a onclick="goHome()" class="active" data-page="home">首页</a></li>
+      <li><a onclick="startWorkflow()" data-page="review">开始审查</a></li>
+      <li><a onclick="goToStage('history')" data-page="history">历史记录</a></li>
+    </ul>
+  </div>
+  <div class="nav-status"><div class="nav-dot" id="navDot"></div><span id="navStatusText">就绪</span></div>
+</nav>
+
+<!-- ═══════════ STAGE BAR (3 steps, shown during review flow) ═══════════ -->
+<div class="stage-bar-wrap" id="stageBarWrap">
+  <div class="stage-bar">
+    <div class="stage-item done" data-stage="review" onclick="goToStage('review')">
+      <div class="stage-num">1</div><span>输入代码</span>
+    </div>
+    <div class="stage-connector" id="conn1"></div>
+    <div class="stage-item" data-stage="progress" id="stageProgress" onclick="goToStage('progress')">
+      <div class="stage-num">2</div><span>审查过程</span>
+    </div>
+    <div class="stage-connector" id="conn2"></div>
+    <div class="stage-item" data-stage="results" id="stageResults" onclick="goToStage('results')">
+      <div class="stage-num">3</div><span>审查结果</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ PAGE: HOME ═══════════ -->
+<div class="page active" id="page-home">
+  <div class="home-hero">
+    <div class="hero-shapes">
+      <div class="hero-shape" style="top:15%;left:8%;animation-delay:0s;">def secure():</div>
+      <div class="hero-shape" style="top:25%;right:10%;animation-delay:-5s;">O(n log n)</div>
+      <div class="hero-shape" style="top:60%;left:12%;animation-delay:-10s;">try/except</div>
+      <div class="hero-shape" style="top:55%;right:8%;animation-delay:-15s;">SELECT *</div>
+      <div class="hero-shape" style="top:40%;left:70%;animation-delay:-8s;">await</div>
+      <div class="hero-shape" style="top:70%;left:45%;animation-delay:-12s;">sql_inject</div>
+    </div>
+    <div class="hero-badge">Multi-Agent Code Review</div>
+    <h1 class="hero-title">让 AI 智能体团队<br><span class="hl">守护每一行代码</span></h1>
+    <p class="hero-sub">三个专业审查智能体并行协作，覆盖安全漏洞、性能瓶颈、代码质量三个维度，一键生成修复方案。</p>
+    <button class="hero-btn" onclick="startWorkflow()">我们开始吧</button>
+  </div>
+
+  <div class="home-section">
+    <h2 class="section-title">审查维度</h2>
+    <p class="section-sub">AgentTeam 协作，多维度覆盖代码质量</p>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <span class="fc-icon">🔐</span>
+        <div class="fc-name">安全审查</div>
+        <div class="fc-desc">检测 SQL 注入、XSS、敏感信息泄露、认证缺陷等 7 类安全风险</div>
+        <div class="fc-tags"><span class="fc-tag tag-sec">注入漏洞</span><span class="fc-tag tag-sec">XSS</span><span class="fc-tag tag-sec">数据泄露</span></div>
+      </div>
+      <div class="feature-card">
+        <span class="fc-icon">⚡</span>
+        <div class="fc-name">性能优化</div>
+        <div class="fc-desc">分析算法复杂度、N+1 查询、内存泄漏、IO 瓶颈等 7 类性能问题</div>
+        <div class="fc-tags"><span class="fc-tag tag-perf">复杂度</span><span class="fc-tag tag-perf">数据库</span><span class="fc-tag tag-perf">内存</span></div>
+      </div>
+      <div class="feature-card">
+        <span class="fc-icon">🧠</span>
+        <div class="fc-name">代码质量</div>
+        <div class="fc-desc">审查命名规范、函数设计、圈复杂度、错误处理等 8 类质量问题</div>
+        <div class="fc-tags"><span class="fc-tag tag-biz">命名</span><span class="fc-tag tag-biz">设计模式</span><span class="fc-tag tag-biz">可测试性</span></div>
+      </div>
+    </div>
+
+<div class="flow-section">
+  <div class="flow-header">
+    <div class="fh-title">审查工作流</div>
+    <div class="fh-sub">从代码提交到报告存档，七个环节组成完整的自动化审查管线</div>
+  </div>
+
+  <!-- Mini pipeline overview -->
+  <div class="flow-pipeline">
+    <div class="fl-pipe-step"><div class="fl-dot" style="background:var(--blue-400);"></div>输入</div>
+    <span class="fl-pipe-arrow">→</span>
+    <div class="fl-pipe-step"><div class="fl-dot" style="background:#6366f1;"></div>解析</div>
+    <span class="fl-pipe-arrow">→</span>
+    <div class="fl-pipe-step"><div class="fl-dot" style="background:var(--amber);"></div>静态分析</div>
+    <span class="fl-pipe-arrow">→</span>
+    <div class="fl-pipe-step"><div class="fl-dot" style="background:var(--orange);"></div>AgentTeam</div>
+    <span class="fl-pipe-arrow">→</span>
+    <div class="fl-pipe-step"><div class="fl-dot" style="background:var(--purple);"></div>汇总决策</div>
+    <span class="fl-pipe-arrow">→</span>
+    <div class="fl-pipe-step"><div class="fl-dot" style="background:var(--green);"></div>修复方案</div>
+    <span class="fl-pipe-arrow">→</span>
+    <div class="fl-pipe-step"><div class="fl-dot" style="background:var(--blue-600);"></div>报告存档</div>
+  </div>
+
+  <div class="flow-track">
+    <!-- Step 1: Input -->
+    <div class="flow-step s1">
+      <div class="fs-marker" data-step="1">📥</div>
+      <div class="fs-body">
+        <div class="fs-title">代码输入</div>
+        <div class="fs-desc">支持三种代码提交方式，灵活适配不同开发场景。粘贴代码片段进行快速审查，上传本地文件或指定目录路径进行批量扫描，也可直接提供 GitHub 仓库 URL 自动克隆全仓库代码。</div>
+        <div class="fs-detail">
+          <span class="fs-tag blue">GitHub 仓库</span><span class="fs-tag blue">本地路径</span><span class="fs-tag blue">粘贴代码</span><span class="fs-tag blue">文件上传</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Parse -->
+    <div class="flow-step s2">
+      <div class="fs-marker" data-step="2">🔍</div>
+      <div class="fs-body">
+        <div class="fs-title">代码解析与预处理</div>
+        <div class="fs-desc">自动识别超过 30 种代码文件类型（Python、JavaScript、Go、Java、Rust 等），过滤 node_modules、.git、__pycache__ 等非代码目录，将所有文件拼接为带路径头标识的统一审查输入，并校验总大小不超过 200KB 上限。</div>
+        <div class="fs-detail">
+          <span class="fs-tag indigo">文件识别</span><span class="fs-tag indigo">目录过滤</span><span class="fs-tag indigo">大小校验</span><span class="fs-tag indigo">拼接合并</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Lint -->
+    <div class="flow-step s3">
+      <div class="fs-marker" data-step="3">🔬</div>
+      <div class="fs-body">
+        <div class="fs-title">静态分析</div>
+        <div class="fs-desc">运行 flake8 和 pylint 对代码进行静态检查，预先捕获语法错误、代码风格违规、未使用变量、导入顺序等基础问题。静态分析结果将作为辅助上下文提供给后续的智能体审查阶段，不重复标记已有问题。</div>
+        <div class="fs-detail">
+          <span class="fs-tag amber">flake8</span><span class="fs-tag amber">pylint</span><span class="fs-tag amber">语法检查</span><span class="fs-tag amber">风格扫描</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 4: AgentTeam (parallel) -->
+    <div class="flow-step s4">
+      <div class="fs-marker" data-step="4">🤖</div>
+      <div class="fs-body">
+        <div class="fs-title">AgentTeam 并行审查</div>
+        <div class="fs-desc">基于 LangGraph 编排引擎，三个专业 AI 智能体同时启动，各自独立审查代码的不同维度：</div>
+        <div class="fs-branches">
+          <div class="fs-branch">
+            <div class="fsb-icon">🔐</div>
+            <div class="fsb-name">安全审查专家</div>
+            <div class="fsb-desc">检测注入漏洞（SQL / 命令 / LDAP）、XSS 跨站脚本、硬编码密钥与密码、认证授权缺陷、不安全的加密算法、路径遍历等</div>
+            <div class="fsb-meta"><span style="width:6px;height:6px;border-radius:50%;background:var(--red);"></span>7 个审查维度</div>
+          </div>
+          <div class="fs-branch">
+            <div class="fsb-icon">⚡</div>
+            <div class="fsb-name">性能优化师</div>
+            <div class="fsb-desc">分析算法复杂度（O(n²) 检测）、N+1 数据库查询、内存泄漏风险、不必要的 IO 操作、缓存策略缺失、并发与锁竞争问题</div>
+            <div class="fsb-meta"><span style="width:6px;height:6px;border-radius:50%;background:var(--amber);"></span>7 个审查维度</div>
+          </div>
+          <div class="fs-branch">
+            <div class="fsb-icon">🧠</div>
+            <div class="fsb-name">业务逻辑审核</div>
+            <div class="fsb-desc">审查命名规范与代码可读性、函数设计合理性、圈复杂度、DRY 原则遵守、错误处理完备性、设计模式适用性及可测试性</div>
+            <div class="fsb-meta"><span style="width:6px;height:6px;border-radius:50%;background:var(--purple);"></span>8 个审查维度</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 5: Orchestrator -->
+    <div class="flow-step s5">
+      <div class="fs-marker" data-step="5">🎯</div>
+      <div class="fs-body">
+        <div class="fs-title">决策者汇总去重</div>
+        <div class="fs-desc">Orchestrator 智能体收集三个专家的全部 findings，执行智能去重合并——当多个专家发现同一问题时合并为一条记录并标注发现来源。随后进行严重等级校准（critical / high / medium / low），按实际影响和优先级排序，确保最重要的安全问题排在最前面。</div>
+        <div class="fs-detail">
+          <span class="fs-tag purple">去重合并</span><span class="fs-tag purple">等级校准</span><span class="fs-tag purple">优先级排序</span><span class="fs-tag purple">交叉验证</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 6: Fix code & diff -->
+    <div class="flow-step s6">
+      <div class="fs-marker" data-step="6">🔧</div>
+      <div class="fs-body">
+        <div class="fs-title">生成修复方案</div>
+        <div class="fs-desc">根据汇总后的 findings 自动生成完整的修复后代码和 Unified Diff 对比。左侧展示原始代码、右侧展示修复后代码，逐行标注增删改。修复代码保持原有功能逻辑不变，仅针对标记的问题进行精准修复。无法自动修复的问题在说明中标注原因。</div>
+        <div class="fs-detail">
+          <span class="fs-tag green">修复代码</span><span class="fs-tag green">Unified Diff</span><span class="fs-tag green">左右对比</span><span class="fs-tag green">逐行标注</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 7: Persist to history -->
+    <div class="flow-step s7">
+      <div class="fs-marker" data-step="7">📊</div>
+      <div class="fs-body">
+        <div class="fs-title">报告持久化存档</div>
+        <div class="fs-desc">审查报告自动存入 SQLite 数据库，包含完整的安全审查结果、性能分析、质量评估、合并报告及修复代码。支持按时间倒序浏览历史记录，随时回溯查看任意历史审查的详细报告和代码对比，便于追踪代码质量演变趋势。</div>
+        <div class="fs-detail">
+          <span class="fs-tag blue">SQLite 存储</span><span class="fs-tag blue">历史回溯</span><span class="fs-tag blue">报告查看</span><span class="fs-tag blue">趋势追踪</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+<!-- ═══════════ PAGE: INPUT ═══════════ -->
+<div class="page" id="page-review">
+  <div style="max-width:1100px;margin:0 auto;padding:28px 24px 64px;">
+    <div class="mode-grid">
+      <div class="mode-card active" data-mode="github_full" onclick="selectMode('github_full')">
+        <div class="mode-check"></div><span class="mode-icon">🌐</span>
+        <div class="mode-name">GitHub 全仓库</div><div class="mode-desc">输入仓库 URL，自动克隆并审查全部代码文件</div>
+      </div>
+      <div class="mode-card" data-mode="github_path" onclick="selectMode('github_path')">
+        <div class="mode-check"></div><span class="mode-icon">📂</span>
+        <div class="mode-name">GitHub + 路径</div><div class="mode-desc">仓库 URL + 子路径，只审查指定目录</div>
+      </div>
+      <div class="mode-card" data-mode="local" onclick="selectMode('local')">
+        <div class="mode-check"></div><span class="mode-icon">💻</span>
+        <div class="mode-name">本地代码</div><div class="mode-desc">粘贴代码 / 上传文件 / 本地路径</div>
+      </div>
+    </div>
+
+    <div class="input-section active" id="sec-github_full">
+      <div class="card">
+        <div class="field-group"><label class="field-label">GitHub 仓库 URL</label>
+          <input class="field-input" id="githubFullUrl" type="text" placeholder="https://github.com/user/repo.git"></div>
+      </div>
+    </div>
+
+    <div class="input-section" id="sec-github_path">
+      <div class="card">
+        <div class="field-group"><label class="field-label">GitHub 仓库 URL</label>
+          <input class="field-input" id="githubPathUrl" type="text" placeholder="https://github.com/user/repo.git"></div>
+        <div class="field-group"><label class="field-label">仓库内路径</label>
+          <input class="field-input" id="githubPathPath" type="text" placeholder="src/core/ 或 app.py"></div>
+      </div>
+    </div>
+
+    <div class="input-section" id="sec-local">
+      <div class="card">
+        <div class="local-tabs">
+          <button class="local-tab active" data-local="paste" onclick="selectLocalTab('paste')">粘贴代码</button>
+          <button class="local-tab" data-local="upload" onclick="selectLocalTab('upload')">上传文件</button>
+          <button class="local-tab" data-local="path" onclick="selectLocalTab('path')">本地路径</button>
+        </div>
+        <div class="local-pane active" id="local-paste">
+          <div class="code-area-wrap">
+            <div class="line-numbers-overlay"><pre id="lineNumbers">1</pre></div>
+            <textarea class="code-textarea" id="codeInput" placeholder="在此粘贴待审查代码..."
+              oninput="updateLineNumbers()"
+              onkeydown="if(event.key==='Tab'){event.preventDefault();const s=this.selectionStart,e=this.selectionEnd;this.value=this.value.substring(0,s)+'    '+this.value.substring(e);this.selectionStart=this.selectionEnd=s+4;updateLineNumbers();}"></textarea>
+          </div>
+          <div style="font-size:11px;color:var(--text-faint);margin-top:4px;" id="charCount">0 字符</div>
+        </div>
+        <div class="local-pane" id="local-upload" style="display:none;">
+          <div class="upload-zone" style="border:2px dashed var(--border);border-radius:var(--radius-lg);padding:40px;text-align:center;cursor:pointer;transition:border-color 0.2s,background 0.2s;" onclick="document.getElementById('fileUpload').click()" onmouseover="this.style.borderColor='var(--blue-300)'" onmouseout="this.style.borderColor='var(--border)'">
+            <div style="font-size:32px;margin-bottom:8px;color:var(--blue-300);">⬆</div>
+            <div style="font-size:14px;color:var(--text);font-weight:500;">点击选择代码文件</div>
+            <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">支持 .py .js .ts .java .go 等</div>
+            <input type="file" id="fileUpload" accept=".py,.js,.ts,.tsx,.jsx,.java,.go,.rs,.c,.cpp,.h,.hpp,.cs,.rb,.php,.swift,.kt,.vue,.svelte,.sql,.sh,.yaml,.yml,.toml,.json,.xml,.html,.css,.scss" onchange="handleFileUpload(event)" style="position:absolute;width:1px;height:1px;overflow:hidden;opacity:0;">
+          </div>
+          <div id="uploadPreview" style="display:none;margin-top:12px;"><div style="font-size:11px;color:var(--green);font-weight:500;" id="uploadFileName"></div></div>
+        </div>
+        <div class="local-pane" id="local-path" style="display:none;">
+          <div class="field-group"><label class="field-label">文件或目录的绝对路径</label>
+            <input class="field-input" id="localFilePath" type="text" placeholder="D:\Projects\src\ 或 D:\Projects\main.py"></div>
+          <div style="font-size:11px;color:var(--text-dim);">系统将自动读取文件或递归读取目录中所有支持的代码文件。</div>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" id="reviewBtn" onclick="startReview()" style="width:100%;padding:14px;font-size:14px;">
+      启动审查
+    </button>
+  </div>
+</div>
+
+<!-- ═══════════ PAGE: PROGRESS ═══════════ -->
+<div class="page" id="page-progress">
+  <div style="max-width:1200px;margin:0 auto;padding:28px 24px 64px;">
+    <div class="progress-timer">
+      <div class="pt-time" id="progressTimer">0.0s</div>
+      <div class="pt-msg" id="progressMsg">正在启动审查管线...</div>
+    </div>
+
+    <!-- 7-step pipeline progress bar -->
+    <div class="prog-pipeline" id="progPipeline">
+      <div class="pp-step done" data-pp="1"><div class="pp-icon">📥</div><div class="pp-dot done"></div><div class="pp-label">代码输入</div></div>
+      <span class="pp-arrow done" data-pa="1">→</span>
+      <div class="pp-step" data-pp="2"><div class="pp-icon">🔍</div><div class="pp-dot waiting"></div><div class="pp-label">代码解析</div></div>
+      <span class="pp-arrow" data-pa="2">→</span>
+      <div class="pp-step" data-pp="3"><div class="pp-icon">🔬</div><div class="pp-dot waiting"></div><div class="pp-label">静态分析</div></div>
+      <span class="pp-arrow" data-pa="3">→</span>
+      <div class="pp-step" data-pp="4"><div class="pp-icon">🤖</div><div class="pp-dot waiting"></div><div class="pp-label">AgentTeam</div></div>
+      <span class="pp-arrow" data-pa="4">→</span>
+      <div class="pp-step" data-pp="5"><div class="pp-icon">🎯</div><div class="pp-dot waiting"></div><div class="pp-label">汇总决策</div></div>
+      <span class="pp-arrow" data-pa="5">→</span>
+      <div class="pp-step" data-pp="6"><div class="pp-icon">🔧</div><div class="pp-dot waiting"></div><div class="pp-label">修复方案</div></div>
+      <span class="pp-arrow" data-pa="6">→</span>
+      <div class="pp-step" data-pp="7"><div class="pp-icon">📊</div><div class="pp-dot waiting"></div><div class="pp-label">报告存档</div></div>
+    </div>
+
+    <!-- Current stage detail -->
+    <div class="stage-detail-card" id="stageDetailCard">
+      <span class="sdc-icon" id="sdcIcon">📥</span>
+      <div class="sdc-info">
+        <div class="sdc-title" id="sdcTitle">代码输入</div>
+        <div class="sdc-desc" id="sdcDesc">代码已接收，正在准备进入审查管线...</div>
+      </div>
+      <span class="sdc-status running" id="sdcStatus">进行中</span>
+    </div>
+
+    <div class="progress-layout">
+      <div class="code-preview-panel">
+        <div class="code-preview-header">
+          <span class="cp-title">代码实时审查</span>
+          <span class="cp-meta" id="cpMeta"></span>
+        </div>
+        <div class="code-preview-body" id="codePreviewBody">准备中...</div>
+        <div class="agent-legend">
+          <div class="legend-item"><div class="legend-dot ld-sec"></div> 安全专家</div>
+          <div class="legend-item"><div class="legend-dot ld-perf"></div> 性能优化师</div>
+          <div class="legend-item"><div class="legend-dot ld-biz"></div> 业务逻辑审核</div>
+          <div class="legend-item" style="margin-left:auto;">左侧色条 = 发现问题</div>
+        </div>
+      </div>
+
+      <div class="team-panel" id="teamPanel">
+        <div class="team-title">AgentTeam 审查中</div>
+        <div class="team-subtitle">三个专家并行审查 · 决策者协调汇总</div>
+        <div class="team-grid" id="teamGrid">
+          <div class="agent-card" id="agent-security">
+            <span class="agent-icon">🔐</span>
+            <div class="agent-name">安全专家</div>
+            <div class="agent-role">Security Reviewer</div>
+            <div class="agent-findings" id="af-security">—</div>
+            <div class="agent-label">发现</div>
+          </div>
+          <div class="agent-card" id="agent-performance">
+            <span class="agent-icon">⚡</span>
+            <div class="agent-name">性能优化师</div>
+            <div class="agent-role">Performance Reviewer</div>
+            <div class="agent-findings" id="af-performance">—</div>
+            <div class="agent-label">发现</div>
+          </div>
+          <div class="agent-card" id="agent-business">
+            <span class="agent-icon">🧠</span>
+            <div class="agent-name">业务逻辑审核</div>
+            <div class="agent-role">Quality Reviewer</div>
+            <div class="agent-findings" id="af-business">—</div>
+            <div class="agent-label">发现</div>
+          </div>
+        </div>
+        <div class="orch-connectors">
+          <div class="orch-conn" id="oc1"></div>
+          <div class="orch-conn" id="oc2"></div>
+          <div class="orch-conn" id="oc3"></div>
+        </div>
+        <div class="orch-row">
+          <div class="orch-card" id="agent-orchestrator">
+            <span class="agent-icon">🎯</span>
+            <div class="agent-name">决策者 · Orchestrator</div>
+            <div class="agent-role">汇总去重 · 生成修复 · 输出报告</div>
+            <div class="orch-findings" id="af-orchestrator">等待专家审查完成...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ PAGE: RESULTS ═══════════ -->
+<div class="page" id="page-results">
+  <div style="max-width:1100px;margin:0 auto;padding:28px 24px 64px;">
+    <span style="font-size:11px;color:var(--text-dim);" id="resultTaskId"></span>
+    <div id="resultsContainer"></div>
+    <div class="results-footer">
+      <button class="btn btn-primary" onclick="finishReview()" style="padding:14px 48px;font-size:15px;">
+        ✓ 完成审查，返回首页
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ PAGE: HISTORY ═══════════ -->
+<div class="page" id="page-history">
+  <div style="max-width:1100px;margin:0 auto;padding:28px 24px 64px;">
+    <div class="card">
+      <div class="card-header"><span class="card-title">审查档案</span>
+        <button class="btn btn-ghost" onclick="loadHistory()" style="font-size:12px;">刷新</button>
+      </div>
+      <div class="history-grid" id="historyGrid">
+        <div class="empty-state"><div class="es-icon">—</div><div class="es-title">暂无记录</div><div class="es-sub">完成一次审查后，记录将显示在这里</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let currentMode = 'github_full';
+let currentLocalTab = 'paste';
+let uploadedFileContent = '';
+let currentTaskId = null;
+let pollTimer = null;
+let uiTimer = null;
+let progressStart = 0;
+let stageState = { review:'done', progress:'', results:'' };
+let simulatedFindings = { security:0, performance:0, business:0 };
+let codePreviewLines = [];
+let agentIssueLines = { security:[], performance:[], business:[] };
+let pollCount = 0;
+
+// ── Helpers ─────────────────────────────
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function $(id) { return document.getElementById(id); }
+
+// ── Navigation ──────────────────────────
+window.goHome = function() {
+  clearInterval(pollTimer); clearInterval(uiTimer);
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  $('page-home').classList.add('active');
+  $('stageBarWrap').classList.remove('show');
+  document.querySelectorAll('.nav-links a').forEach(l => l.classList.remove('active'));
+  document.querySelector('[data-page="home"]').classList.add('active');
+};
+
+window.startWorkflow = function() {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  $('page-review').classList.add('active');
+  $('stageBarWrap').classList.add('show');
+  stageState = { review:'active', progress:'', results:'' };
+  updateStageBar();
+  document.querySelectorAll('.nav-links a').forEach(l => l.classList.remove('active'));
+  document.querySelector('[data-page="review"]').classList.add('active');
+};
+
+window.finishReview = function() {
+  currentTaskId = null;
+  clearInterval(pollTimer); clearInterval(uiTimer);
+  goHome();
+};
+
+// ── Stage Navigation ────────────────────
+function updateStageBar() {
+  const items = document.querySelectorAll('.stage-bar .stage-item');
+  items.forEach(item => {
+    const stage = item.dataset.stage;
+    item.classList.remove('done','active');
+    if (stageState[stage] === 'done') item.classList.add('done');
+    if (stageState[stage] === 'active') item.classList.add('active');
+  });
+  ['conn1','conn2'].forEach((c,i) => {
+    const conn = document.getElementById(c);
+    if (conn) conn.classList.toggle('done', stageState[['progress','results'][i]] === 'done');
+  });
+}
+
+window.goToStage = function(stage) {
+  if (stage === 'history') {
+    clearInterval(pollTimer); clearInterval(uiTimer);
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    $('page-history').classList.add('active');
+    $('stageBarWrap').classList.remove('show');
+    document.querySelectorAll('.nav-links a').forEach(l => l.classList.remove('active'));
+    document.querySelector('[data-page="history"]').classList.add('active');
+    loadHistory();
+    return;
+  }
+  if (!currentTaskId) return;
+  if (stage === 'review') { navigateToPage('review'); return; }
+  if (stage === 'progress' && (stageState.progress === 'done' || stageState.progress === 'active')) { navigateToPage('progress'); return; }
+  if (stage === 'results' && (stageState.results === 'done' || stageState.results === 'active')) { navigateToPage('results'); return; }
+};
+
+function setStageActive(stage) {
+  Object.keys(stageState).forEach(s => {
+    if (s === stage) stageState[s] = 'active';
+    else if (stageState[s] === 'active') stageState[s] = 'done';
+  });
+  updateStageBar();
+}
+
+function navigateToPage(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  const pageEl = document.getElementById('page-' + page);
+  if (pageEl) pageEl.classList.add('active');
+  $('stageBarWrap').classList.add('show');
+  setStageActive(page);
+  if (page === 'progress' && currentTaskId) { progressStart = Date.now(); updateProgressUI(); }
+}
+
+// ── Mode ────────────────────────────────
+window.selectMode = function(mode) {
+  currentMode = mode;
+  document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('active'));
+  document.querySelector(`[data-mode="${mode}"]`).classList.add('active');
+  document.querySelectorAll('.input-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('sec-' + mode).classList.add('active');
+};
+
+// ── Local Tab ───────────────────────────
+window.selectLocalTab = function(tab) {
+  currentLocalTab = tab;
+  document.querySelectorAll('.local-tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`[data-local="${tab}"]`).classList.add('active');
+  document.querySelectorAll('.local-pane').forEach(p => p.style.display = 'none');
+  document.getElementById('local-' + tab).style.display = 'block';
+};
+
+// ── Line Numbers ────────────────────────
+window.updateLineNumbers = function() {
+  const ta = $('codeInput');
+  const lines = Math.max((ta.value||'').split('\n').length, 1);
+  $('lineNumbers').textContent = Array.from({length:lines},(_,i)=>i+1).join('\n');
+  $('charCount').textContent = (ta.value||'').length + ' 字符';
+};
+
+// ── File Upload ─────────────────────────
+window.handleFileUpload = function(e) {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    uploadedFileContent = ev.target.result;
+    $('uploadFileName').textContent = '已加载: ' + file.name + ' (' + uploadedFileContent.length + ' 字符)';
+    $('uploadPreview').style.display = 'block';
+  };
+  reader.readAsText(file);
+};
+
+// ── Code Preview (line-by-line) ─────────
+function formatCodePreview(code) {
+  const rawLines = (code||'').split('\n');
+  codePreviewLines = rawLines;
+  let html = '';
+  rawLines.forEach((line, i) => {
+    if (/^# ======== .+? ========$/.test(line.trim())) {
+      html += `<div class="file-marker">${escHtml(line)}</div>`;
+      return;
+    }
+    html += `<div class="code-line" data-line="${i}" id="cl-${i}">
+      <span class="cl-num">${i+1}</span>
+      <span class="cl-issue-dot" id="dot-${i}"></span>
+      <span class="cl-text">${escHtml(line)||'&nbsp;'}</span>
+    </div>`;
+  });
+  return html;
+}
+
+function updateCodeAnnotations(elapsed) {
+  const totalLines = codePreviewLines.length || 1;
+  const pl = getPipelineStage(elapsed);
+
+  const agents = [
+    { id:'security', startPct:0, endPct:0.35 },
+    { id:'performance', startPct:0.3, endPct:0.65 },
+    { id:'business', startPct:0.6, endPct:1.0 },
+  ];
+
+  agents.forEach(agent => {
+    const agentState = pl.agents[agent.id];
+    let scanStart = -1, scanEnd = -1;
+
+    if (agentState === 'running') {
+      const startLine = Math.floor(agent.startPct * totalLines);
+      const endLine = Math.floor(agent.endPct * totalLines);
+      const range = endLine - startLine;
+      const progress = ((elapsed * 2.5) % (range * 0.7)) / (range * 0.7);
+      const windowSize = Math.max(3, Math.floor(range * 0.10));
+      const center = startLine + Math.floor(progress * range);
+      scanStart = Math.max(startLine, center - Math.floor(windowSize/2));
+      scanEnd = Math.min(endLine, center + Math.floor(windowSize/2));
+
+      // Randomly add issue markers
+      if (!agentIssueLines[agent.id]) agentIssueLines[agent.id] = [];
+      const issues = agentIssueLines[agent.id];
+      if (issues.length < 4 && Math.random() < 0.12 && elapsed > 2) {
+        const issueLine = scanStart + Math.floor(Math.random() * (scanEnd - scanStart));
+        if (!issues.includes(issueLine) && issueLine < totalLines) {
+          issues.push(issueLine);
+        }
+      }
+    }
+
+    const allLines = document.querySelectorAll('#codePreviewBody .code-line');
+    allLines.forEach(lineEl => {
+      const ln = parseInt(lineEl.dataset.line);
+      lineEl.classList.remove('scan-' + agent.id, 'issue-' + agent.id);
+      const dot = lineEl.querySelector('.cl-issue-dot');
+      if (dot) { dot.classList.remove('show','dot-sec','dot-perf','dot-biz'); }
+
+      if (ln >= scanStart && ln <= scanEnd) {
+        lineEl.classList.add('scan-' + agent.id);
+      }
+      const issues = agentIssueLines[agent.id] || [];
+      if (issues.includes(ln)) {
+        lineEl.classList.add('issue-' + agent.id);
+        if (dot) {
+          dot.classList.add('show');
+          const dc = agent.id === 'security' ? 'dot-sec' : agent.id === 'performance' ? 'dot-perf' : 'dot-biz';
+          dot.classList.add(dc);
+        }
+      }
+    });
+  });
+}
+
+function resetCodeAnnotations() {
+  agentIssueLines = { security:[], performance:[], business:[] };
+  codePreviewLines = [];
+}
+
+// ── Build Request ───────────────────────
+function buildRequest() {
+  if (currentMode === 'github_full') {
+    const url = $('githubFullUrl').value.trim();
+    if (!url) throw new Error('请输入 GitHub 仓库 URL');
+    return { source:'github_full', repo_url:url };
+  }
+  if (currentMode === 'github_path') {
+    const url = $('githubPathUrl').value.trim(), path = $('githubPathPath').value.trim();
+    if (!url) throw new Error('请输入 GitHub 仓库 URL');
+    if (!path) throw new Error('请输入仓库内路径');
+    return { source:'github_path', repo_url:url, target_path:path };
+  }
+  if (currentMode === 'local') {
+    if (currentLocalTab === 'paste') {
+      const code = $('codeInput').value.trim();
+      if (!code) throw new Error('请粘贴待审查代码');
+      return { source:'local', code };
+    }
+    if (currentLocalTab === 'upload') {
+      if (!uploadedFileContent) throw new Error('请选择要上传的文件');
+      return { source:'local', code:uploadedFileContent };
+    }
+    if (currentLocalTab === 'path') {
+      const fp = $('localFilePath').value.trim();
+      if (!fp) throw new Error('请输入本地文件或目录路径');
+      return { source:'local', file_path:fp };
+    }
+  }
+  throw new Error('未知模式');
+}
+
+// ── Start Review ────────────────────────
+window.startReview = async function() {
+  let reqBody;
+  try { reqBody = buildRequest(); } catch(e) { alert(e.message); return; }
+
+  const btn = $('reviewBtn'); btn.disabled = true; btn.textContent = '提交中…';
+
+  try {
+    const resp = await fetch(API + '/api/review', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(reqBody) });
+    if (!resp.ok) { const err = await resp.json(); alert('请求失败: ' + (err.detail || resp.statusText)); btn.disabled = false; btn.textContent = '启动审查'; return; }
+    const data = await resp.json();
+    currentTaskId = data.task_id;
+    $('resultTaskId').textContent = 'Task: ' + currentTaskId.substring(0,8) + '...';
+    pollCount = 0;
+    simulatedFindings = { security:0, performance:0, business:0 };
+
+    const code = reqBody.code || '';
+    $('codePreviewBody').innerHTML = formatCodePreview(code) || '<span style="color:var(--text-faint)">(等待读取代码...)</span>';
+    const info = data.resolved_info || {};
+    $('cpMeta').textContent = (info.lines||code.split('\n').length||'—') + ' 行 · ' + (info.code_size||code.length||'—') + ' 字符';
+
+    resetAgentCards();
+    resetCodeAnnotations();
+
+    stageState = { review:'done', progress:'active', results:'' };
+    updateStageBar();
+    navigateToPage('progress');
+    progressStart = Date.now();
+    if (pollTimer) clearInterval(pollTimer); clearInterval(uiTimer);
+    if (uiTimer) clearInterval(uiTimer);
+    pollTimer = setInterval(pollProgress, 2000);
+    uiTimer = setInterval(runProgressUI, 50);
+    updateProgressUI();
+  } catch(e) { alert('无法连接后端: ' + e.message); btn.disabled = false; btn.textContent = '启动审查'; }
+};
+
+function resetAgentCards() {
+  ['security','performance','business'].forEach(id => {
+    const card = document.getElementById('agent-' + id);
+    if (!card) return;
+    card.classList.remove('running','done');
+    document.getElementById('af-' + id).textContent = '—';
+    document.getElementById('af-' + id).className = 'agent-findings';
+  });
+  const orch = document.getElementById('agent-orchestrator');
+  if (orch) { orch.classList.remove('running','done'); }
+  const orchFindings = document.getElementById('af-orchestrator');
+  if (orchFindings) orchFindings.textContent = '等待专家审查完成...';
+  ['oc1','oc2','oc3'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('done','running');
+  });
+}
+
+// ── Progress UI ─────────────────────────
+function updateProgressUI() {
+  const elapsed = (Date.now() - progressStart) / 1000;
+  $('progressTimer').textContent = elapsed.toFixed(1) + 's';
+}
+
+// Pipeline stage config: [step, startTime, endTime, icon, title, desc]
+const PIPELINE_STAGES = [
+  { step:1, start:0,  end:999, icon:'📥', title:'代码输入',       desc:'代码已成功提交，进入审查管线' },
+  { step:2, start:1,  end:4,   icon:'🔍', title:'代码解析与预处理', desc:'识别文件类型、过滤非代码目录、拼接合并为统一输入' },
+  { step:3, start:3,  end:7,   icon:'🔬', title:'静态分析',       desc:'运行 flake8 / pylint 预检查，捕获语法错误与风格问题' },
+  { step:4, start:5,  end:24,  icon:'🤖', title:'AgentTeam 并行审查', desc:'三个 AI 专家同时审查安全、性能、代码质量三个维度' },
+  { step:5, start:22, end:30,  icon:'🎯', title:'决策者汇总去重', desc:'Orchestrator 合并去重 findings、校准等级、按优先级排序' },
+  { step:6, start:28, end:34,  icon:'🔧', title:'生成修复方案',   desc:'生成完整修复代码与 Unified Diff，左右逐行对比' },
+  { step:7, start:32, end:999, icon:'📊', title:'报告持久化存档', desc:'审查结果存入 SQLite 数据库，支持历史回溯与趋势追踪' },
+];
+
+function getPipelineStage(elapsed) {
+  let active = 1;
+  for (let i = PIPELINE_STAGES.length - 1; i >= 0; i--) {
+    if (elapsed >= PIPELINE_STAGES[i].start) { active = PIPELINE_STAGES[i].step; break; }
+  }
+  const stages = PIPELINE_STAGES.map(s => ({
+    ...s,
+    status: elapsed >= s.end ? 'done' : (s.step === active ? 'running' : 'waiting'),
+  }));
+  // Agent states within stage 4
+  const inStage4 = elapsed >= 5 && elapsed < 24;
+  const agents = {
+    security:  !inStage4 ? 'waiting' : elapsed < 6 ? 'waiting' : elapsed < 16 ? 'running' : 'done',
+    performance: !inStage4 ? 'waiting' : elapsed < 7 ? 'waiting' : elapsed < 20 ? 'running' : 'done',
+    business:  !inStage4 ? 'waiting' : elapsed < 8 ? 'waiting' : elapsed < 22 ? 'running' : 'done',
+  };
+  const orchRunning = elapsed >= 22 && elapsed < 30;
+  return {
+    stages,
+    activeStage: active,
+    agents,
+    orchestrator: orchRunning ? 'running' : (elapsed >= 30 ? 'done' : 'waiting'),
+    allWorkersDone: elapsed >= 22,
+    allDone: elapsed >= 34,
+  };
+}
+
+function updatePipelineUI(pl) {
+  // Update pipeline steps
+  pl.stages.forEach(s => {
+    const el = document.querySelector('[data-pp="' + s.step + '"]');
+    if (!el) return;
+    el.classList.remove('done','active');
+    if (s.status === 'done') el.classList.add('done');
+    if (s.status === 'running') el.classList.add('active');
+    const dot = el.querySelector('.pp-dot');
+    if (dot) { dot.className = 'pp-dot ' + s.status; }
+  });
+  // Update arrows
+  for (let i = 1; i <= 6; i++) {
+    const arrow = document.querySelector('[data-pa="' + i + '"]');
+    if (arrow) arrow.classList.toggle('done', pl.stages[i] && pl.stages[i].status === 'done');
+  }
+  // Update stage detail card
+  const activeInfo = PIPELINE_STAGES.find(s => s.step === pl.activeStage) || PIPELINE_STAGES[0];
+  const sdcIcon = document.getElementById('sdcIcon');
+  const sdcTitle = document.getElementById('sdcTitle');
+  const sdcDesc = document.getElementById('sdcDesc');
+  const sdcStatus = document.getElementById('sdcStatus');
+  if (sdcIcon) sdcIcon.textContent = activeInfo.icon;
+  if (sdcTitle) sdcTitle.textContent = activeInfo.title;
+  if (sdcDesc) sdcDesc.textContent = activeInfo.desc;
+  if (sdcStatus) {
+    sdcStatus.textContent = pl.activeStage >= 7 && pl.allDone ? '已完成' : '进行中';
+    sdcStatus.className = 'sdc-status ' + (pl.activeStage >= 7 && pl.allDone ? 'done' : 'running');
+  }
+}
+
+function updateAgentCards(stage) {
+  const agents = ['security','performance','business'];
+  const agentNames = {security:'安全专家', performance:'性能优化师', business:'业务逻辑审核'};
+
+  agents.forEach(id => {
+    const card = document.getElementById('agent-' + id);
+    const findingsEl = document.getElementById('af-' + id);
+    if (!card || !findingsEl) return;
+
+    card.classList.remove('running','done');
+    if (stage.agents[id] === 'running') {
+      card.classList.add('running');
+      findingsEl.textContent = '...';
+      findingsEl.className = 'agent-findings';
+    } else if (stage.agents[id] === 'done') {
+      card.classList.add('done');
+      if (simulatedFindings[id] === 0) {
+        simulatedFindings[id] = Math.floor(Math.random() * 4);
+      }
+      findingsEl.textContent = simulatedFindings[id];
+      findingsEl.className = 'agent-findings ' + (simulatedFindings[id] > 0 ? 'has-findings' : 'clean');
+    } else {
+      findingsEl.textContent = '—';
+      findingsEl.className = 'agent-findings';
+    }
+  });
+
+  const orch = document.getElementById('agent-orchestrator');
+  const orchFindings = document.getElementById('af-orchestrator');
+  ['oc1','oc2','oc3'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('done','running');
+  });
+
+  if (orch) {
+    orch.classList.remove('running','done');
+    if (stage.orchestrator === 'running') {
+      orch.classList.add('running');
+      ['oc1','oc2','oc3'].forEach(id => { const el = document.getElementById(id); if(el) el.classList.add('running'); });
+      if (orchFindings) orchFindings.textContent = '正在汇总审查结果...';
+    } else if (stage.orchestrator === 'done') {
+      orch.classList.add('done');
+      ['oc1','oc2','oc3'].forEach(id => { const el = document.getElementById(id); if(el) el.classList.add('done'); });
+      const total = simulatedFindings.security + simulatedFindings.performance + simulatedFindings.business;
+      if (orchFindings) orchFindings.textContent = total + ' 个问题 · 修复代码已生成';
+    }
+  }
+
+  // Status message
+  if (stage.orchestrator === 'done') {
+    $('progressMsg').textContent = '审查完成！正在加载结果...';
+  } else if (stage.orchestrator === 'running') {
+    $('progressMsg').textContent = '决策者正在汇总审查意见并生成修复代码...';
+  } else if (stage.allWorkersDone) {
+    $('progressMsg').textContent = '所有专家审查完成，即将启动决策者汇总...';
+  } else {
+    const runningAgents = agents.filter(a => stage.agents[a] === 'running');
+    if (runningAgents.length > 0) {
+      $('progressMsg').textContent = agentNames[runningAgents[0]] + ' 正在审查中...';
+    } else {
+      $('progressMsg').textContent = '正在启动审查智能体...';
+    }
+  }
+
+  // Dim team panel when before stage 4 or after stage 5
+  const teamPanel = document.getElementById('teamPanel');
+  if (teamPanel) {
+    const visible = stage.activeStage === 4 || stage.activeStage === 5;
+    teamPanel.classList.toggle('dimmed', !visible);
+  }
+}
+
+// ── High-freq UI update ──────────────────
+function runProgressUI() {
+  const elapsed = (Date.now() - progressStart) / 1000;
+  $('progressTimer').textContent = elapsed.toFixed(1) + 's';
+  const pl = getPipelineStage(elapsed);
+  updatePipelineUI(pl);
+  updateAgentCards({agents:pl.agents, orchestrator:pl.orchestrator, allWorkersDone:pl.allWorkersDone, allDone:pl.allDone, activeStage:pl.activeStage});
+  updateCodeAnnotations(elapsed);
+}
+
+// ── Poll ────────────────────────────────
+async function pollProgress() {
+  if (!currentTaskId) return;
+  pollCount++;
+  const elapsed = (Date.now() - progressStart) / 1000;
+  try {
+    const resp = await fetch(API + '/api/review/' + currentTaskId);
+    const data = await resp.json();
+    if (data.status === 'completed') {
+      clearInterval(pollTimer); clearInterval(uiTimer);
+      updateAgentCards({agents:{security:'done',performance:'done',business:'done'},orchestrator:'done',allWorkersDone:true,allDone:true,activeStage:7});
+      // Mark all pipeline steps as done
+      updatePipelineUI(getPipelineStage(60));
+      // Show team panel again
+      const tp = document.getElementById('teamPanel'); if (tp) tp.classList.remove('dimmed');
+      // Clear scan highlights, keep issue markers
+      document.querySelectorAll('#codePreviewBody .code-line').forEach(el => {
+        el.classList.remove('scan-security','scan-performance','scan-business');
+      });
+      // Get real findings counts
+      const reports = {};
+      (data.reports||[]).forEach(r => { reports[r.review_type] = r; });
+      ['security','performance','business'].forEach(type => {
+        const r = reports[type] || {};
+        let f = r.findings;
+        if (typeof f === 'string') { try { f = JSON.parse(f); } catch(e) { f = []; } }
+        if (Array.isArray(f)) simulatedFindings[type] = f.length;
+        const el = document.getElementById('af-' + type);
+        if (el) { el.textContent = f.length; el.className = 'agent-findings ' + (f.length > 0 ? 'has-findings' : 'clean'); }
+      });
+      const total = simulatedFindings.security + simulatedFindings.performance + simulatedFindings.business;
+      const af = document.getElementById('af-orchestrator');
+      if (af) af.textContent = total + ' 个问题 · 修复代码已生成';
+
+      $('progressMsg').textContent = '审查完成！正在加载结果...';
+      stageState = { review:'done', progress:'done', results:'active' };
+      updateStageBar();
+      setTimeout(() => { renderResults(data); navigateToPage('results'); }, 1000);
+    } else if (data.status === 'failed') {
+      clearInterval(pollTimer); clearInterval(uiTimer);
+      stageState = { review:'done', progress:'done', results:'active' };
+      updateStageBar();
+      setTimeout(() => { renderResults(data); navigateToPage('results'); }, 800);
+    }
+  } catch(e) {}
+}
+
+// ── Results ─────────────────────────────
+function renderResults(data) {
+  const container = $('resultsContainer');
+  const reports = {};
+  (data.reports||[]).forEach(r => { reports[r.review_type] = r; });
+  const merged = reports['merged'] || {};
+  let findings = merged.findings;
+  if (typeof findings === 'string') { try { findings = JSON.parse(findings); } catch(e) { findings = []; } }
+  if (!Array.isArray(findings)) findings = [];
+
+  const counts = {critical:0, high:0, medium:0, low:0};
+  findings.forEach(f => { const s = f.severity||'low'; counts[s] = (counts[s]||0)+1; });
+
+  let summary = merged.severity_summary;
+  if (typeof summary === 'string') { try { summary = JSON.parse(summary); } catch(e) {} }
+  const summaryText = (summary&&summary.summary) ? summary.summary : (typeof summary==='string'?summary:'审查完成');
+  const fixDesc = (summary&&summary.fix_description) ? summary.fix_description : '';
+
+  const sourceLabels = {github_full:'GitHub 全仓库', github_path:'GitHub + 路径', local:'本地代码'};
+  const sourceLabel = sourceLabels[data.source] || data.source || '本地';
+  const target = data.repo_url || data.target_path || '直接输入';
+  const codeLen = (data.code||'').length;
+  const codeLines = (data.code||'').split('\n').length;
+  const fileMatches = (data.code||'').match(/# ======== .+? ========/g) || [];
+
+  container.innerHTML = `
+    <div class="overview-card">
+      <div class="oc-title">审查裁定</div>
+      <div class="oc-text">${escHtml(summaryText)}</div>
+      ${fixDesc?`<div class="oc-text" style="font-style:normal;margin-top:4px;">→ ${escHtml(fixDesc)}</div>`:''}
+      <div class="oc-meta">
+        <span>模式: ${sourceLabel}</span>
+        <span>目标: ${escHtml(target?.substring(0,80)||'—')}</span>
+        <span>规模: ${codeLines} 行 · ${codeLen} 字符${fileMatches.length>1?' · '+fileMatches.length+' 个文件':''}</span>
+        <span>问题: ${findings.length} 个</span>
+      </div>
+    </div>
+    <div class="summary-grid">
+      <div class="summary-item"><div class="si-label" style="color:var(--red);">Critical</div><div class="si-value" style="color:var(--red);">${counts.critical}</div></div>
+      <div class="summary-item"><div class="si-label" style="color:var(--orange);">High</div><div class="si-value" style="color:var(--orange);">${counts.high}</div></div>
+      <div class="summary-item"><div class="si-label" style="color:var(--amber);">Medium</div><div class="si-value" style="color:var(--amber);">${counts.medium}</div></div>
+      <div class="summary-item"><div class="si-label" style="color:var(--green);">Low</div><div class="si-value" style="color:var(--green);">${counts.low}</div></div>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden;">
+      <div class="tab-bar" style="padding:0 20px;background:var(--surface2);">
+        <button class="tab-btn active" onclick="switchResultTab('merged')">综合报告</button>
+        <button class="tab-btn" onclick="switchResultTab('security')">安全审查</button>
+        <button class="tab-btn" onclick="switchResultTab('performance')">性能审查</button>
+        <button class="tab-btn" onclick="switchResultTab('business')">业务逻辑</button>
+        <button class="tab-btn" onclick="switchResultTab('diff')">代码对比</button>
+        <button class="tab-btn" onclick="switchResultTab('fixed')">修复代码</button>
+      </div>
+      <div style="padding:16px 20px 20px;">
+        ${buildFindingsTab('merged', reports)}
+        ${buildFindingsTab('security', reports)}
+        ${buildFindingsTab('performance', reports)}
+        ${buildFindingsTab('business', reports)}
+        ${buildDiffTab(data.code||'', merged.diff||'', merged.fixed_code||'')}
+        ${buildFixedTab(merged.fixed_code||'')}
+      </div>
+    </div>
+  `;
+  container.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function buildFindingsTab(key, reports) {
+  const r = reports[key] || {};
+  let f = r.findings;
+  if (typeof f === 'string') { try { f = JSON.parse(f); } catch(e) { f = []; } }
+  if (!Array.isArray(f)) f = [];
+  const sevOrder = {critical:0, high:1, medium:2, low:3};
+  f.sort((a,b) => (sevOrder[a.severity]||99) - (sevOrder[b.severity]||99));
+  const sevLabel = {critical:'严重', high:'高危', medium:'中等', low:'轻微'};
+
+  let html = `<div class="tab-pane${key==='merged'?' active':''}" id="tab-${key}">`;
+  if (f.length === 0) {
+    html += `<div style="text-align:center;padding:32px;color:var(--green);font-size:14px;">✓ 未发现此类问题</div>`;
+  }
+  f.forEach((fi, i) => {
+    const snippet = fi.code_snippet || '';
+    const startLine = fi.line || 1;
+    const snippetLines = snippet.split('\n');
+    // Build line-numbered code block
+    let codeHtml = '';
+    if (snippet) {
+      const lnHtml = snippetLines.map((_, idx) => {
+        const ln = startLine + idx;
+        const isTarget = idx === 0; // first line = the flagged line
+        return `<span class="${isTarget ? 'hl' : ''}">${ln}</span>`;
+      }).join('');
+      codeHtml = `<div class="f-row"><div class="f-label">相关代码 (L${startLine})</div>
+        <div class="f-code">
+          <div class="fc-ln-col">${lnHtml}</div>
+          <div class="fc-code-col">${escHtml(snippet)}</div>
+        </div></div>`;
+    }
+    html += `
+      <div class="finding" id="f-${key}-${i}">
+        <div class="finding-header" onclick="toggleFinding('f-${key}-${i}')">
+          <div class="finding-dot dot-${fi.severity||'low'}"></div>
+          <span style="flex:1;">${escHtml(fi.category||'未分类')}</span>
+          <span class="tag tag-${fi.severity||'low'}" style="margin-right:8px;">${sevLabel[fi.severity]||fi.severity}</span>
+          <span style="font-size:11px;color:var(--text-dim);">L${fi.line||'?'}</span>
+          <span style="font-size:11px;color:var(--blue-400);margin-left:4px;">▶</span>
+        </div>
+        <div class="finding-body">
+          <div class="f-row"><div class="f-label">问题描述</div><div class="f-desc">${escHtml(fi.description||'')}</div></div>
+          ${codeHtml}
+          <div class="f-row"><div class="f-label">修复建议</div><div class="f-suggestion">${escHtml(fi.suggestion||'')}</div></div>
+          ${fi.found_by ? `<div class="f-meta"><span>发现者: ${fi.found_by.map(x => ({security:'🔐 安全', performance:'⚡ 性能', business_logic:'🧠 业务'})[x]||x).join(' · ')}</span></div>` : ''}
+        </div>
+      </div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+function buildSideBySideDiff(original, fixed) {
+  const origLines = (original||'').split('\n');
+  const fixedLines = (fixed||'').split('\n');
+  const maxLen = Math.max(origLines.length, fixedLines.length);
+  let html = `<div class="diff-sxs">
+    <div class="diff-sxs-header left">− 原始代码</div>
+    <div class="diff-sxs-header right">+ 修复后代码</div>`;
+  let oi = 0, fi = 0;
+  while (oi < maxLen || fi < maxLen) {
+    const ol = oi < origLines.length ? origLines[oi] : null;
+    const fl = fi < fixedLines.length ? fixedLines[fi] : null;
+    if (ol !== null && fl !== null && ol === fl) {
+      html += `<div class="diff-sxs-cell ctx">${escHtml(ol)}</div><div class="diff-sxs-cell ctx">${escHtml(fl)}</div>`;
+      oi++; fi++;
+    } else if (ol !== null && fl !== null) {
+      html += `<div class="diff-sxs-cell rem">${escHtml(ol)}</div><div class="diff-sxs-cell add">${escHtml(fl)}</div>`;
+      oi++; fi++;
+    } else if (ol !== null) {
+      html += `<div class="diff-sxs-cell rem">${escHtml(ol)}</div><div class="diff-sxs-cell empty"></div>`;
+      oi++;
+    } else if (fl !== null) {
+      html += `<div class="diff-sxs-cell empty"></div><div class="diff-sxs-cell add">${escHtml(fl)}</div>`;
+      fi++;
+    } else { break; }
+  }
+  html += '</div>';
+  return html;
+}
+
+function buildDiffTab(originalCode, diffText, fixedCode) {
+  let html = `<div class="tab-pane" id="tab-diff">`;
+  if (originalCode && fixedCode) {
+    html += buildSideBySideDiff(originalCode, fixedCode);
+  } else if (diffText) {
+    html += `<div style="font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.7;background:var(--surface);border:1px solid var(--border-light);border-radius:var(--radius);padding:16px;">`;
+    diffText.split('\n').forEach(line => {
+      let color = 'var(--text-dim)';
+      if (line.startsWith('---')||line.startsWith('+++')||line.startsWith('@@')) color = 'var(--blue-600)';
+      else if (line.startsWith('-')) color = 'var(--red)';
+      else if (line.startsWith('+')) color = 'var(--green)';
+      html += `<div style="color:${color};white-space:pre-wrap;">${escHtml(line)}</div>`;
+    });
+    html += `</div>`;
+  } else {
+    html += `<div style="text-align:center;padding:32px;color:var(--text-dim);font-size:13px;">无变更对比</div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+function buildFixedTab(code) {
+  let html = `<div class="tab-pane" id="tab-fixed">`;
+  if (!code) {
+    html += `<div style="text-align:center;padding:32px;color:var(--text-dim);font-size:13px;">无修复代码</div>`;
+  } else {
+    html += `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <span style="font-size:11px;color:var(--text-dim);letter-spacing:0.5px;">修复后完整代码</span>
+        <button class="btn btn-primary" style="padding:6px 20px;font-size:11px;" onclick="copyFixed(this)">复制修复代码</button>
+      </div>
+      <div class="fixed-code-block"><pre>${escHtml(code)}</pre></div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+window.toggleFinding = function(id) { document.getElementById(id)?.classList.toggle('expanded'); };
+
+window.switchResultTab = function(key) {
+  const tabs = ['merged','security','performance','business','diff','fixed'];
+  document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', tabs[i]===key));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  const el = document.getElementById('tab-'+key);
+  if (el) el.classList.add('active');
+};
+
+window.copyFixed = function(btn) {
+  const pre = document.querySelector('#tab-fixed pre');
+  if (pre) { navigator.clipboard.writeText(pre.textContent); btn.textContent='已复制 ✓'; setTimeout(()=>btn.textContent='复制修复代码',1500); }
+};
+
+// ── History ─────────────────────────────
+async function loadHistory() {
+  const grid = $('historyGrid');
+  try {
+    const resp = await fetch(API + '/api/history?limit=50');
+    const items = await resp.json();
+    if (!items.length) {
+      grid.innerHTML = `<div class="empty-state"><div class="es-icon">—</div><div class="es-title">暂无记录</div><div class="es-sub">完成一次审查后，记录将显示在这里</div></div>`;
+      return;
+    }
+    const sourceLabels = {github_full:'GitHub 全仓库', github_path:'GitHub + 路径', local:'本地代码'};
+    grid.innerHTML = items.map(item => {
+      const statusClass = {'completed':'status-completed','failed':'status-failed','reviewing':'status-reviewing'}[item.status]||'';
+      const statusLabel = {'completed':'已完成','failed':'失败','reviewing':'审查中','pending':'等待中'}[item.status]||item.status;
+      const date = (item.created_at||'').replace('T',' ').substring(0,19);
+      const preview = (item.code_preview||'').replace(/\n/g,' ').substring(0,80);
+      return `<div class="history-card" onclick="viewHistoryTask('${item.id}')">
+        <div class="hc-main">
+          <div class="hc-date">${date} · <span class="hc-source">${sourceLabels[item.source]||item.source||'本地'}</span></div>
+          <div class="hc-path">${escHtml((item.repo_url||item.target_path||'直接输入')?.substring(0,100))}</div>
+          <div class="hc-preview">${escHtml(preview)}</div>
+        </div>
+        <span class="hc-status ${statusClass}">${statusLabel}</span>
+        <span style="color:var(--text-faint);font-size:18px;">→</span>
+      </div>`;
+    }).join('');
+  } catch(e) {}
+}
+
+async function viewHistoryTask(taskId) {
+  try {
+    const resp = await fetch(API + '/api/review/' + taskId);
+    const data = await resp.json();
+    currentTaskId = taskId;
+    $('resultTaskId').textContent = 'Task: ' + taskId.substring(0,8) + '...';
+    stageState = { review:'done', progress:'done', results:'active' };
+    updateStageBar();
+    $('stageBarWrap').classList.add('show');
+    renderResults(data); navigateToPage('results');
+  } catch(e) {}
+}
+
+// ── Init ────────────────────────────────
+async function checkHealth() {
+  try { const r = await fetch(API+'/api/history?limit=1'); setNavOnline(r.ok); }
+  catch(e) { setNavOnline(false); }
+}
+function setNavOnline(online) {
+  const d = $('navDot'); d.classList.toggle('off',!online);
+  $('navStatusText').textContent = online ? '在线' : '离线';
+}
+checkHealth(); setInterval(checkHealth, 30000);
+updateLineNumbers();
+updateStageBar();
+</script>
+</body>
+</html>

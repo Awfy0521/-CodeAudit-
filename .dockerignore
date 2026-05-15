@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.db
+.git/
+.gitignore
+.claude/
+.vscode/
+.idea/
+__MACOSX/
+*.md
+🚀*.docx
+streamlit_app.py
+.DS_Store
