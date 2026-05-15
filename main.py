@@ -24,6 +24,8 @@ from database.crud import (
 )
 from agents.graph import review_graph
 from security_fence import scan, desensitize_report, desensitize_report_str
+from feedback import router as feedback_router
+from feedback.analyzer import run_weekly_analysis
 
 # ── Constants ─────────────────────────────
 
@@ -41,6 +43,14 @@ MAX_TOTAL_SIZE = 200_000  # ~200KB max for review
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # 定时任务：每周一凌晨 3:00 执行误报分析
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
+        scheduler.add_job(run_weekly_analysis, "cron", day_of_week="mon", hour=3, minute=0, id="weekly_analysis")
+        scheduler.start()
+    except Exception:
+        pass
     yield
 
 
@@ -51,6 +61,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(feedback_router)
 
 # Serve static SPA frontend
 static_dir = os.path.join(os.path.dirname(__file__), "static")
