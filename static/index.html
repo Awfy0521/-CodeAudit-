@@ -525,6 +525,29 @@
     .page { padding:20px 12px 48px; }
     .home-hero { padding:48px 20px 40px; }
   }
+
+    /* ── Feedback ───────────────────── */
+    .f-feedback { display:flex; gap:6px; margin-top:8px; }
+    .fb-btn {
+      background:var(--surface2); border:1px solid var(--border);
+      border-radius:var(--radius-sm); padding:4px 12px; font-size:14px;
+      cursor:pointer; transition:all 0.2s;
+    }
+    .fb-btn:hover { background:var(--surface3); }
+    .fb-btn.rated-agree { background:var(--green-bg); border-color:var(--green); }
+    .fb-btn.rated-disagree { background:var(--red-bg); border-color:var(--red); }
+    .rating-section { margin-top:20px; padding:20px; background:var(--surface); border:1px solid var(--border-light); border-radius:var(--radius); }
+    .rating-title { font-size:14px; font-weight:600; color:var(--text); margin-bottom:8px; }
+    .star-row { display:flex; gap:6px; margin-bottom:12px; }
+    .star-btn { font-size:24px; cursor:pointer; color:var(--border); transition:color 0.15s; background:none; border:none; }
+    .star-btn.active { color:var(--amber); }
+    .rating-note { width:100%; min-height:60px; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); font-family:inherit; font-size:13px; resize:vertical; }
+    .rating-submit { margin-top:8px; }
+    .fb-msg { font-size:12px; color:var(--green); margin-top:4px; display:none; }
+    .dep-warn { padding:12px 16px; background:var(--red-bg); border:1px solid var(--red); border-radius:var(--radius); margin-bottom:16px; }
+    .dep-warn-title { font-weight:600; color:var(--red); margin-bottom:6px; font-size:13px; }
+    .dep-warn-item { font-size:12px; color:var(--text); margin-bottom:2px; }
+
 </style>
 </head>
 <body>
@@ -904,7 +927,21 @@
 <div class="page" id="page-results">
   <div style="max-width:1100px;margin:0 auto;padding:28px 24px 64px;">
     <span style="font-size:11px;color:var(--text-dim);" id="resultTaskId"></span>
-    <div id="resultsContainer"></div>
+    <div id="resultsContainer">
+    <div class="rating-section" id="ratingSection" style="display:none;">
+      <div class="rating-title">对本次审查的评价</div>
+      <div class="star-row" id="starRow">
+        <button class="star-btn" data-star="1" onclick="setRating(1)">☆</button>
+        <button class="star-btn" data-star="2" onclick="setRating(2)">☆</button>
+        <button class="star-btn" data-star="3" onclick="setRating(3)">☆</button>
+        <button class="star-btn" data-star="4" onclick="setRating(4)">☆</button>
+        <button class="star-btn" data-star="5" onclick="setRating(5)">☆</button>
+      </div>
+      <textarea class="rating-note" id="ratingNote" placeholder="可选：补充文字反馈..."></textarea>
+      <button class="btn btn-primary rating-submit" onclick="submitRating()" style="font-size:12px;">提交评价</button>
+      <div class="fb-msg" id="ratingMsg">已提交</div>
+    </div>
+</div>
     <div class="results-footer">
       <button class="btn btn-outline" onclick="exportReport('md')" style="margin-right:12px;">📥 导出 Markdown</button>
       <button class="btn btn-outline" onclick="exportReport('json')" style="margin-right:12px;">📋 导出 JSON</button>
@@ -1509,6 +1546,7 @@ function renderResults(data) {
     </div>
   `;
   container.scrollIntoView({behavior:'smooth',block:'start'});
+      $('ratingSection').style.display = 'block';
 }
 
 function buildFindingsTab(key, reports) {
@@ -1555,7 +1593,11 @@ function buildFindingsTab(key, reports) {
           <div class="f-row"><div class="f-label">问题描述</div><div class="f-desc">${escHtml(fi.description||'')}</div></div>
           ${codeHtml}
           <div class="f-row"><div class="f-label">修复建议</div><div class="f-suggestion">${escHtml(fi.suggestion||'')}</div></div>
-          ${fi.found_by ? `<div class="f-meta"><span>发现者: ${fi.found_by.map(x => ({security:'🔐 安全', performance:'⚡ 性能', business_logic:'🧠 业务'})[x]||x).join(' · ')}</span></div>` : ''}
+          ${fi.found_by ? `<div class="f-meta"><span>发现者: ${fi.found_by.map(x => ({security:'🔐 安全', performance:'⚡ 性能', business_logic:'🧠 业务'})[x]||x).join(' · ')}</span></div>` : ''} +
+          "<div class='f-feedback'>" +
+          "<button class='fb-btn' id='fb-" + key + "-" + i + "-agree' onclick='event.stopPropagation();submitFindingFeedback(event, \"" + key + "\", " + i + ", \"agree\")">👍 认同</button>" +
+          "<button class='fb-btn' id='fb-" + key + "-" + i + "-disagree' onclick='event.stopPropagation();submitFindingFeedback(event, \"" + key + "\", " + i + ", \"disagree\")">👎 误报</button>" +
+          "</div>"
         </div>
       </div>`;
   });
@@ -1746,6 +1788,73 @@ async function loadTrends() {
   }
 }
 
+// ── Feedback ──────────────────────────────
+let currentRating = 0;
+
+window.setRating = function(star) {
+  currentRating = star;
+  document.querySelectorAll('#starRow .star-btn').forEach((b,i) => {
+    b.textContent = i < star ? '★' : '☆';
+    b.classList.toggle('active', i < star);
+  });
+};
+
+window.submitFindingFeedback = async function(ev, key, idx, verdict) {
+  ev.stopPropagation();
+  if (!currentTaskId) return;
+  const btnAgree = document.getElementById('fb-' + key + '-' + idx + '-' + 'agree');
+  const btnDisagree = document.getElementById('fb-' + key + '-' + idx + '-' + 'disagree');
+  const msgEl = document.getElementById('fb-msg-' + key + '-' + idx);
+  try {
+    const resp = await fetch(API + '/api/feedback/' + currentTaskId, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({finding_index: idx, verdict: verdict, note: ''})
+    });
+    if (resp.ok) {
+      if (verdict === 'agree') { btnAgree.classList.add('rated-agree'); btnDisagree.style.opacity='0.4'; }
+      else { btnDisagree.classList.add('rated-disagree'); btnAgree.style.opacity='0.4'; }
+      if (msgEl) { msgEl.style.display='block'; msgEl.textContent = '✓ 已提交'; }
+    }
+  } catch(e) {}
+};
+
+window.submitRating = async function() {
+  if (!currentTaskId || currentRating === 0) return;
+  const note = document.getElementById('ratingNote')?.value || '';
+  try {
+    const resp = await fetch(API + '/api/feedback/' + currentTaskId + '/rating', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({rating: currentRating, review_note: note})
+    });
+    if (resp.ok) {
+      document.getElementById('ratingMsg').style.display = 'block';
+      document.getElementById('ratingMsg').textContent = '评价已提交，感谢反馈！';
+    }
+  } catch(e) {}
+};
+
+async function loadFeedbackAnalysis() {
+  try {
+    const resp = await fetch(API + '/api/feedback/analysis/latest');
+    const data = await resp.json();
+    if (!data.agent_summary || data.agent_summary.length === 0) return '';
+    const labelMap = {security:'安全', performance:'性能', business_logic:'业务', architecture:'架构'};
+    let html = '<div style="margin-top:20px;padding:20px;background:var(--surface);border:1px solid var(--border-light);border-radius:var(--radius);">';
+    html += '<div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px;">📊 Agent 反馈统计（近7天）</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;">';
+    for (const a of data.agent_summary) {
+      const total = (a.agree||0) + (a.disagree||0) || 1;
+      const rate = ((a.disagree||0) / total * 100).toFixed(0);
+      html += '<div style="padding:12px;background:var(--surface2);border-radius:var(--radius-sm);"><div style="font-size:12px;font-weight:600;">' + (labelMap[a.agent]||a.agent) + '</div>';
+      html += '<div style="font-size:11px;color:var(--text-dim);margin-top:4px;">认同 ' + (a.agree||0) + ' · 误报 ' + (a.disagree||0) + ' · <span style="color:' + (rate > 30 ? 'var(--red)' : 'var(--green)') + '">' + rate + '%</span></div></div>';
+    }
+    html += '</div></div>';
+    return html;
+  } catch(e) { return ''; }
+}
+
 function renderTrends(data) {
   const s = data.summary || {};
   const tu = data.token_usage || {};
@@ -1806,6 +1915,7 @@ function renderTrends(data) {
         '<div style="font-size:24px;font-weight:600;color:var(--blue-500);">' + (tu.total_tokens||0).toLocaleString() + '</div>' +
         '<div style="font-size:10px;color:var(--text-dim);letter-spacing:0.5px;">全部 Tokens · ' + (tu.tasks_tracked||0) + ' 次审查</div></div>' +
     '</div>' + timelineHtml;
+  loadFeedbackAnalysis().then(fb => { if(fb) $('trendsContainer').innerHTML += fb; });
 }
 
 // ── Init ────────────────────────────────
