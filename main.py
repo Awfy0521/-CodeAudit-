@@ -23,6 +23,7 @@ from database.crud import (
     save_token_usage,
 )
 from agents.graph import review_graph
+from security_fence import scan, desensitize_report, desensitize_report_str
 
 # ── Constants ─────────────────────────────
 
@@ -227,8 +228,12 @@ def run_review(task_id: str, code: str, source: str, scope: str, target_path: st
     """后台执行审查流程。"""
     try:
         update_task_status(task_id, "reviewing")
+        # 安全围栏：脱敏后发送给 LLM，映射表仅保留在内存中
+        safe_code, secret_map = scan(code)
+        if secret_map:
+            print(f"[SecurityFence] 检测到 {len(secret_map)} 处敏感信息，已替换占位符")
         initial_state = {
-            "code": code,
+            "code": safe_code,
             "scope": scope,
             "target_path": target_path,
             "security_review": {},
@@ -259,6 +264,7 @@ def run_review(task_id: str, code: str, source: str, scope: str, target_path: st
         ]:
             review_data = result.get(key, {})
             if review_data:
+                review_data = desensitize_report(review_data, secret_map)
                 save_report(
                     task_id=task_id,
                     review_type=review_type,
@@ -284,6 +290,8 @@ def run_review(task_id: str, code: str, source: str, scope: str, target_path: st
 
         merged = result.get("merged_review", {})
         if merged:
+            merged = desensitize_report(merged, secret_map)
+            saved_fixed_code = desensitize_report_str(result.get("fixed_code", ""), secret_map)
             save_report(
                 task_id=task_id,
                 review_type="merged",
@@ -292,7 +300,7 @@ def run_review(task_id: str, code: str, source: str, scope: str, target_path: st
                     "summary": merged.get("summary", ""),
                     "fix_description": merged.get("fix_description", ""),
                 },
-                fixed_code=result.get("fixed_code", ""),
+                fixed_code=saved_fixed_code,
                 diff=result.get("diff", ""),
             )
 

@@ -9,4 +9,5 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["python", "main.py"]
+# Use start() instead of dev() — reload mode is not suitable for containers
+CMD ["python", "-c", "from main import start; start()"]
